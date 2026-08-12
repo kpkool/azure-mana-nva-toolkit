@@ -85,10 +85,10 @@ Appliance OSes (Palo Alto **PAN-OS**, Cisco **IOS-XE / ASAv / FTDv**, Check Poin
 - **Check the vendor's MANA / Accelerated Networking compatibility matrix** (release notes / admin guide) for: supported VM series, minimum **PAN-OS/IOS-XE/FortiOS** version, and any required image/driver update.
 - **Confirm with the vendor (TAC/support case)** whether your exact version + VM size supports MANA, and the recommended upgrade path.
 - **Use the appliance's own CLI/console** where it exposes interface/driver detail (e.g., PAN-OS `show system state`, Cisco `show platform`/`show interface`), rather than Linux tools.
-- **If an AN NVA degrades on MANA and isn't compatible yet:** apply the `LegacyVMNVA` opt-out. For **Marketplace** appliances the built-in policy tags by publisher/product; for **BYO / non-Marketplace** images, apply the tag through your own tooling and coordinate with the vendor/MSP (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)).
+- **If an NVA isn't confirmed MANA-compatible:** apply the `LegacyVMNVA` opt-out **proactively** (don't wait for degradation). For **Marketplace** appliances the built-in policy tags by publisher/product; for **BYO / non-Marketplace** images, apply the tag through your own tooling and coordinate with the vendor/MSP (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md#when-to-use--when-not-to-use)).
 
 > Do not assume a vendor supports (or doesn't support) MANA — always confirm against the vendor's current documentation for your version.
 
 ## Next step
 
-Take every **AN-enabled candidate on an eligible size** and confirm actual NIC/hardware with [verify-mana-nic.md](./verify-mana-nic.md). Apply the [`LegacyVMNVA` opt-out](./implementation-legacyvmnva.md) only where an Accelerated Networking NVA shows performance degradation on MANA and isn't MANA-compatible yet.
+Take every **AN-enabled candidate on an eligible size** and confirm actual NIC/hardware with [verify-mana-nic.md](./verify-mana-nic.md). For any NVA **not confirmed MANA-compatible**, apply the [`LegacyVMNVA` opt-out](./implementation-legacyvmnva.md#when-to-use--when-not-to-use) **proactively** as a safeguard, then migrate and remove it.

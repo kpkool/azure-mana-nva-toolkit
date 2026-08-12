@@ -25,7 +25,7 @@ The **Microsoft Azure Network Adapter (MANA)** is Azure's next-generation networ
 
 1. **Inventory** candidates at scale (Azure Resource Graph) → find VMs with Accelerated Networking on eligible sizes.
 2. **Verify** each candidate in-guest → is it actually on MANA? (`mana` vs `mlx5_core`).
-3. **Opt out** only where an AN NVA degrades on MANA and isn't compatible yet → `LegacyVMNVA`.
+3. **Safeguard (if needed)** — for any NVA **not confirmed MANA-compatible**, apply the `LegacyVMNVA` opt-out **proactively** (don't wait for a performance hit).
 4. **Migrate** to a MANA-compatible config, then remove the exception.
 
 ## Step 1 — Find candidates at scale (Azure Resource Graph)
@@ -89,7 +89,7 @@ Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-
 
 1. Identify NVA workloads on MANA-eligible VM series; confirm whether Accelerated Networking is enabled. If not enabled, no action is required.
 2. Confirm MANA compatibility with your NVA vendor (VM series, OS, drivers, image version).
-3. If an Accelerated Networking NVA sees performance degradation on MANA and isn't compatible yet, use the `LegacyVMNVA` temporary exception.
+3. **If an NVA is not confirmed MANA-compatible, apply the `LegacyVMNVA` opt-out proactively — don't wait for a performance hit** (which can be severe and cause an outage). It keeps the NVA off MANA hardware until you validate compatibility and migrate. See [when / why / how / when-not](./docs/implementation-legacyvmnva.md#when-to-use--when-not-to-use).
 4. Assign the built-in `LegacyVMNVA` Azure Policy; for existing resources, remediate to add the tag, then **reapply** to enable it. New in-scope deployments get the tag automatically.
 5. Roll out gradually with safe-deployment practices; validate app + network behavior.
 6. Migrate to a MANA-compatible configuration and remove the exception when compatibility is confirmed.
@@ -99,7 +99,7 @@ Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-
 ## Important notes
 
 - **Placement is Azure-controlled** — you cannot force a VM onto MANA. Newer (v6) sizes are far more likely to land on MANA.
-- The `LegacyVMNVA` exception is only for **Accelerated Networking** workloads that observe **performance degradation** on MANA — don't apply broadly.
+- **`LegacyVMNVA` is a situational safeguard, not the goal** — a documented process for **when / why / how (and when not)** to defer MANA placement. Apply it **proactively** to NVAs not yet confirmed MANA-compatible; **don't** apply it broadly, to MANA-compatible workloads, to AN-disabled VMs, or to AKS pools. Details: [implementation-legacyvmnva.md](./docs/implementation-legacyvmnva.md#when-to-use--when-not-to-use).
 - The built-in policy auto-tags only **Marketplace NVA** images. For NVAs acquired outside Marketplace or via a managed service, coordinate tag deployment with the vendor/MSP.
 
 ## License

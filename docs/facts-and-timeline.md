@@ -62,7 +62,7 @@ If a VM lands on MANA hardware but the OS doesn't support MANA, networking **fal
 ## 7. The `LegacyVMNVA` temporary exception
 
 - A **tag** applied via a **built-in Azure Policy** that keeps NVA VMs / VM Scale Sets off MANA hardware while you migrate.
-- **Only needed** for Accelerated Networking workloads that observe **performance degradation** on MANA hardware. Do **not** apply broadly.
+- **Use as a proactive safeguard** for Accelerated Networking NVAs **not yet confirmed MANA-compatible** — apply **before** a placement change rather than waiting for degradation (which can cause an outage). The official opt-out page frames the trigger as *observed performance degradation*; applying proactively is the safer operational practice. Do **not** apply broadly — see [when to use / when not to use](./implementation-legacyvmnva.md#when-to-use--when-not-to-use).
 - The built-in policy **scopes tag application to specific NVA publishers and product IDs in Azure Marketplace**.
 - Applying the policy has **no cost implications**.
 - The built-in policy **cannot be edited directly** (duplicate it if customization is needed).
