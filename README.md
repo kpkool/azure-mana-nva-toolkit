@@ -32,56 +32,29 @@ The **Microsoft Azure Network Adapter (MANA)** is Azure's next-generation networ
 
 ```mermaid
 flowchart LR
-  A["Discover: ARG inventory (VM + VMSS)"] --> B["Assess: eligible size + Accelerated Networking"]
-  B --> C["Verify on host: MANA vs ConnectX"]
-  C --> D{"MANA compatible?"}
-  D -->|"Yes"| E["Allow MANA: validate and monitor"]
-  D -->|"No"| F["Safeguard: apply LegacyVMNVA proactively"]
-  F --> G["Migrate: MANA-ready size, OS, or vendor version"]
-  G --> H["Remove tag after compatibility confirmed"]
-  E --> I["Govern continuously"]
-  H --> I
-  I -->|"new VMs, drift, new eligible sizes"| A
+  A["Discover (ARG)"] --> B["Verify on host"]
+  B --> C{"MANA compatible?"}
+  C -->|"Yes"| D["Allow MANA"]
+  C -->|"No"| E["Apply LegacyVMNVA, then migrate"]
+  D --> F["Govern continuously"]
+  E --> F
+  F -->|"new VMs, drift"| A
 ```
 
 ### In-depth technical process
 
 ```mermaid
 flowchart TD
-  subgraph DISCOVER["1 Discover and assess (control plane)"]
-    A1["ARG: inventory-nva-vms.kql and inventory-nva-vmss.kql"] --> A2["Columns: Vendor, Size, AN, LegacyVMNVA tag, Verdict"]
-    A2 --> A3{"AN enabled and eligible size?"}
-    A3 -->|"No or AKS pool"| Z1["No action: not impacted"]
-    A3 -->|"Yes"| B1["Candidate list"]
-  end
-  subgraph VERIFY["2 Verify on host (data plane)"]
-    B1 --> C1["Linux: detect-mana.sh, checks lspci 00ba and ethtool -i vf"]
-    B1 --> C2["Windows: detect-mana.ps1, checks Get-NetAdapter and Get-PnpDevice"]
-    B1 --> C3["Third-party NVA: vendor CLI, compatibility matrix, support case"]
-    C1 --> D1{"MANA compatible?"}
-    C2 --> D1
-    C3 --> D1
-  end
-  subgraph ACT["3 Decide and act"]
-    D1 -->|"Compatible"| E1["Allow MANA, capture traffic evidence"]
-    D1 -->|"Not compatible"| F1["Apply LegacyVMNVA proactively"]
-    F1 --> F2["Marketplace image: built-in Policy tags by publisher"]
-    F1 --> F3["BYO image: manual tag then az vm reapply"]
-    F2 --> F4["Reapply to enable tag"]
-    F3 --> F4
-    F4 --> G1["Migrate: v6 size, MANA-supported OS, or vendor upgrade"]
-    G1 --> G2["Remove tag, confirm mana driver"]
-  end
-  subgraph GOV["4 Continuous governance"]
-    H1["Policy at Management Group: auto-tag new NVAs"]
-    H2["Scheduled ARG or Workbook: drift and new candidates"]
-    H3["Alert on untagged AN NVA on eligible size"]
-    H4["Vendor compatibility register and migration deadlines"]
-    H5["Timeline gates: May 26 2026, Aug 6 2026, tag expiry May 31 2027"]
-  end
-  E1 --> GOV
-  G2 --> GOV
-  GOV --> A1
+  A["1 Discover and assess (ARG): size, AN, tag, verdict"] --> B{"AN and eligible size, not AKS?"}
+  B -->|"No"| Z["No action"]
+  B -->|"Yes"| C["2 Verify on host: mana vs mlx5 (Linux, Windows, vendor)"]
+  C --> D{"MANA compatible?"}
+  D -->|"Yes"| E["Allow MANA and capture evidence"]
+  D -->|"No"| F["3 Apply LegacyVMNVA (policy or manual, then reapply)"]
+  F --> G["Migrate to MANA-ready config, remove tag"]
+  E --> H["4 Govern: policy at scale, drift scan, timeline gates"]
+  G --> H
+  H -->|"loop"| A
 ```
 
 See [docs/governance.md](./docs/governance.md) for the continuous-governance model.
