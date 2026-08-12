@@ -28,6 +28,71 @@ The **Microsoft Azure Network Adapter (MANA)** is Azure's next-generation networ
 3. **Safeguard (if needed)** — for any NVA **not confirmed MANA-compatible**, apply the `LegacyVMNVA` opt-out **proactively** (don't wait for a performance hit).
 4. **Migrate** to a MANA-compatible config, then remove the exception.
 
+### High-level process
+
+```mermaid
+flowchart LR
+  A["Discover: ARG inventory (VM + VMSS)"] --> B["Assess: eligible size + Accelerated Networking"]
+  B --> C["Verify on host: MANA vs ConnectX"]
+  C --> D{"MANA compatible?"}
+  D -->|"Yes"| E["Allow MANA: validate and monitor"]
+  D -->|"No"| F["Safeguard: apply LegacyVMNVA proactively"]
+  F --> G["Migrate: MANA-ready size, OS, or vendor version"]
+  G --> H["Remove tag after compatibility confirmed"]
+  E --> I["Govern continuously"]
+  H --> I
+  I -->|"new VMs, drift, new eligible sizes"| A
+```
+
+### In-depth technical process
+
+```mermaid
+flowchart TD
+  subgraph DISCOVER["1 Discover and assess (control plane)"]
+    A1["ARG: inventory-nva-vms.kql and inventory-nva-vmss.kql"] --> A2["Columns: Vendor, Size, AN, LegacyVMNVA tag, Verdict"]
+    A2 --> A3{"AN enabled and eligible size?"}
+    A3 -->|"No or AKS pool"| Z1["No action: not impacted"]
+    A3 -->|"Yes"| B1["Candidate list"]
+  end
+  subgraph VERIFY["2 Verify on host (data plane)"]
+    B1 --> C1["Linux: detect-mana.sh, checks lspci 00ba and ethtool -i vf"]
+    B1 --> C2["Windows: detect-mana.ps1, checks Get-NetAdapter and Get-PnpDevice"]
+    B1 --> C3["Third-party NVA: vendor CLI, compatibility matrix, support case"]
+    C1 --> D1{"MANA compatible?"}
+    C2 --> D1
+    C3 --> D1
+  end
+  subgraph ACT["3 Decide and act"]
+    D1 -->|"Compatible"| E1["Allow MANA, capture traffic evidence"]
+    D1 -->|"Not compatible"| F1["Apply LegacyVMNVA proactively"]
+    F1 --> F2["Marketplace image: built-in Policy tags by publisher"]
+    F1 --> F3["BYO image: manual tag then az vm reapply"]
+    F2 --> F4["Reapply to enable tag"]
+    F3 --> F4
+    F4 --> G1["Migrate: v6 size, MANA-supported OS, or vendor upgrade"]
+    G1 --> G2["Remove tag, confirm mana driver"]
+  end
+  subgraph GOV["4 Continuous governance"]
+    H1["Policy at Management Group: auto-tag new NVAs"]
+    H2["Scheduled ARG or Workbook: drift and new candidates"]
+    H3["Alert on untagged AN NVA on eligible size"]
+    H4["Vendor compatibility register and migration deadlines"]
+    H5["Timeline gates: May 26 2026, Aug 6 2026, tag expiry May 31 2027"]
+  end
+  E1 --> GOV
+  G2 --> GOV
+  GOV --> A1
+```
+
+See [docs/governance.md](./docs/governance.md) for the continuous-governance model.
+
+## Prerequisites
+
+- **Azure CLI** signed in: `az login`; then `az account set --subscription <subscription-id>`.
+- **Resource Graph extension** (for inventory queries): `az extension add -n resource-graph`.
+- **Permissions:** Reader for inventory; **Virtual Machine Contributor** to run `az vm run-command`; **Resource Policy Contributor** (plus a role for the policy's managed identity) to assign/remediate the opt-out policy.
+- In-guest checks run via `az vm run-command` — **no public IP or inbound SSH required**.
+
 ## Step 1 — Find candidates at scale (Azure Resource Graph)
 
 ```bash
@@ -76,6 +141,7 @@ Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-
 | [docs/inventory-arg.md](./docs/inventory-arg.md)                           | Inventory NVA candidates at scale with Azure Resource Graph (multi-NIC safe)  |
 | [docs/verify-mana-nic.md](./docs/verify-mana-nic.md)                       | Verify MANA (Portal, Linux, Windows) — the definitive checks                  |
 | [docs/implementation-legacyvmnva.md](./docs/implementation-legacyvmnva.md) | Apply the opt-out (policy → remediate → reapply → verify → roll back), az CLI |
+| [docs/governance.md](./docs/governance.md)                                 | Continuous governance: scale enforcement, drift, vendor register, RACI, gates |
 | [docs/evidence-lab.md](./docs/evidence-lab.md)                             | Reproducible MVP lab: deploy, detect, capture traffic, compare MANA vs not    |
 | [docs/sample-outputs.md](./docs/sample-outputs.md)                         | Real (anonymized) script/query outputs: Linux, Windows, traffic, ARG          |
 | [docs/references.md](./docs/references.md)                                 | Public Microsoft references + verified key values                             |

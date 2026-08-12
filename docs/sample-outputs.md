@@ -122,6 +122,31 @@ VMSS         Size               AN       Tag      Verdict
 
 ---
 
+## 6. Policy assignment + remediation (documented process)
+
+Assigning the built-in policy and running remediation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)):
+
+```
+# az policy assignment create ... --policy e87a87f5-...
+{ "enforcement": "Default", "identity": "SystemAssigned", "name": "LegacyVMNVA-optout" }
+
+# az policy remediation create ...
+{ "deploymentStatus": { "failedDeployments": 0, "successfulDeployments": 0, "totalDeployments": 0 },
+  "name": "LegacyVMNVA-remediate", "state": "Succeeded" }
+```
+
+**Verdict:** remediation **Succeeded with 0 deployments** — confirming the built-in policy only tags **Marketplace NVA** publisher/product images. Plain Ubuntu/Windows VMs match nothing, so nothing is tagged (expected). For non-Marketplace/BYO images, use the manual tag + reapply path below.
+
+**Manual tag + reapply (BYO / test images):**
+
+```
+# az vm update ... --set tags.LegacyVMNVA=true   ->  { "LegacyVMNVA": "True" }
+# az vm reapply ...                              ->  exit 0
+# az vm show ... --query tags.LegacyVMNVA        ->  True
+```
+
+---
+
 ## Failure / troubleshooting outputs
 
 **Resource Graph extension missing (CLI):**
