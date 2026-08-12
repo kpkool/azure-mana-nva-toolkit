@@ -142,18 +142,12 @@ The definitive discriminator is the **bound VF driver**:
 
 ---
 
-## Reference results (anonymized, from a real run)
+## Reference results (from a real run)
 
-Ubuntu 24.04 (kernel 6.17.x-azure, `mana.ko` present), public-cloud region, AN enabled, no public IP:
+Full anonymized command/query outputs (Linux, Windows, traffic, ARG, policy) are in [sample-outputs.md](./sample-outputs.md). Two proofs specific to this lab:
 
-| VM (size)               | `lspci`       | VF iface / driver    | Verdict                          |
-| ----------------------- | ------------- | -------------------- | -------------------------------- |
-| v6 (`D4ds_v6`)          | `Device 00ba` | `ens1` / **`mana`**  | ✅ ON MANA                       |
-| v5 (`D4s_v5`)           | `ConnectX-5`  | `enP*` / `mlx5_core` | ❌ NOT MANA                      |
-| v5 (`D4s_v5`) + opt-out | `ConnectX-5`  | `enP*` / `mlx5_core` | ❌ NOT MANA (`LegacyVMNVA=True`) |
-
-- **Traffic proof (MANA VM):** flood ping moved VF counters by ~5,000 packets each way (`vf_rx_packets` and `vf_tx_packets`), confirming traffic on the MANA VF.
-- **Re-roll proof:** `deallocate → start` changes the VF PCI address and resets counters — confirming Azure re-placed the VM. The v5 VMs stayed on ConnectX across re-rolls; the v6 VM stayed on MANA across a restart.
+- **Traffic proof (MANA VM):** flood ping moved VF counters by ~5,000 packets each way (`vf_rx_packets` / `vf_tx_packets`), confirming traffic on the MANA VF.
+- **Re-roll proof:** `deallocate → start` changes the VF PCI address and resets counters — confirming Azure re-placed the VM. In testing, the `D4s_v5` VMs stayed on ConnectX across re-rolls; the `D4ds_v6` VM stayed on MANA across restarts.
 
 ---
 
