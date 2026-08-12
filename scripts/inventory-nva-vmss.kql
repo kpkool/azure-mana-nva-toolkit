@@ -1,0 +1,61 @@
+// Azure Resource Graph — MANA/NVA readiness inventory (Virtual Machine Scale Sets)
+// NVAs are frequently deployed as VMSS. This complements inventory-nva-vms.kql (which covers
+// standalone VMs and VMSS Flex member instances). Run BOTH for full coverage.
+//
+// Per VMSS: orchestration mode, vendor, size, capacity, Accelerated Networking (across NIC configs),
+// LegacyVMNVA tag, and a triage verdict.
+//
+// Runs in Azure Resource Graph Explorer (portal) or via CLI:
+//   az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
+//     --query "data[].{VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,Size:VMSize,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment,RG:resourceGroup}" -o table
+//
+// ARG CANNOT see: whether instances are actually on MANA hardware (verify in-guest with detect-mana.sh),
+//   nor whether a present LegacyVMNVA tag has been ENABLED via a reapply operation.
+
+Resources
+| where type =~ 'microsoft.compute/virtualmachinescalesets'
+| extend LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set")
+| extend AKSCluster = tostring(tags['aks-managed-cluster-name'])
+| extend
+    OrchestrationMode = tostring(properties.orchestrationMode),
+    Vendor = tostring(properties.virtualMachineProfile.storageProfile.imageReference.publisher),
+    Offer = tostring(properties.virtualMachineProfile.storageProfile.imageReference.offer),
+    Sku = tostring(properties.virtualMachineProfile.storageProfile.imageReference.sku),
+    OSType = tostring(properties.virtualMachineProfile.storageProfile.osDisk.osType),
+    VMSize = tostring(sku['name']),
+    Capacity = toint(sku['capacity']),
+    nicConfigs = properties.virtualMachineProfile.networkProfile.networkInterfaceConfigurations
+| extend NICConfigCount = array_length(nicConfigs)
+| mv-expand nic = nicConfigs
+| extend ANnic = iff(tobool(nic.properties.enableAcceleratedNetworking) == true, 1, 0)
+| summarize ANEnabledNICs = sum(ANnic), NICConfigCount = max(NICConfigCount)
+    by subscriptionId, resourceGroup, VMSSName = name, OrchestrationMode, Vendor, Offer, Sku, OSType, VMSize, Capacity, LegacyVMNVATag, AKSCluster, location
+| extend AcceleratedNetworking = case(
+    isnull(NICConfigCount) or NICConfigCount == 0, "No NIC config",
+    ANEnabledNICs == 0, "Disabled",
+    ANEnabledNICs == NICConfigCount, "Enabled",
+    strcat("Partial (", tostring(ANEnabledNICs), "/", tostring(NICConfigCount), ")"))
+| extend IsAKS = (isnotempty(AKSCluster) or VMSSName startswith "aks-")
+| extend Assessment = case(
+    IsAKS, "AKS-managed - not impacted by MANA (per docs)",
+    isnull(NICConfigCount) or NICConfigCount == 0, "Review - no NIC config",
+    ANEnabledNICs == 0, "No action - AN disabled",
+    LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
+    "Candidate - verify on host (detect-mana.sh)")
+| project
+    subscriptionId,
+    resourceGroup,
+    VMSSName,
+    OrchestrationMode,
+    Vendor,
+    Offer,
+    Sku,
+    OSType,
+    VMSize,
+    Capacity,
+    NICConfigCount,
+    AcceleratedNetworking,
+    LegacyVMNVATag,
+    Assessment,
+    location
+| order by Assessment asc, Vendor asc, VMSSName asc

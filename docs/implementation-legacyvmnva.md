@@ -1,0 +1,125 @@
+# Implementing the `LegacyVMNVA` Temporary Exception (az CLI)
+
+> All operations below are taken from the official NVA opt-out page. See [references.md](./references.md).
+> **Verified:** 2026-08-03.
+
+**Order matters:** Assign policy → Remediate (adds tag) → **Reapply (enables tag)** → Verify. Applying the tag **alone is not sufficient** for existing resources.
+
+> **Prerequisite decision:** Only apply this to **Accelerated Networking** NVA workloads that observe **performance degradation** on MANA hardware and are **not yet MANA-compatible**. Do not apply broadly.
+
+> To validate the opt-out end-to-end with before/after NIC + traffic evidence, use [evidence-lab.md](./evidence-lab.md).
+
+---
+
+## Built-in policy identity
+
+| Item                            | Value                                                               |
+| ------------------------------- | ------------------------------------------------------------------- |
+| Policy definition ID            | `e87a87f5-e6dd-4919-be21-abb0a4ea4630`                              |
+| Version at time of verification | `1.3.0`                                                             |
+| Recommended version pin         | `1.*.*` (or enable _Automatically enroll in minor version changes_) |
+| Tag applied                     | `LegacyVMNVA`                                                       |
+| Cost                            | None                                                                |
+| Editable?                       | No — assign as-is (duplicate to customize)                          |
+
+---
+
+## Step 1 — Assign the built-in policy at the right scope
+
+Choose scope: Root Management Group (whole tenant) → Management Group (multi-sub) → Subscription → Resource Group.
+
+```bash
+az policy assignment create \
+  --name "LegacyVMNVA-optout" \
+  --display-name "LegacyVMNVA MANA opt-out" \
+  --policy "e87a87f5-e6dd-4919-be21-abb0a4ea4630" \
+  --scope "/subscriptions/<subscription-id>" \
+  --location <region> \
+  --mi-system-assigned
+```
+
+- A managed identity (`--mi-system-assigned`) is required because the policy performs **remediation** (modify/tag).
+- Pin to minor auto-enrollment by assigning version `1.*.*` so revisions apply automatically.
+- Apply enforcement **gradually** using [Azure Policy safe deployment practices](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/policy-safe-deployment-practices) (incremental rollout by region/resource type).
+
+> **New deployments** within the assigned scope get the `LegacyVMNVA` tag **automatically** — Steps 2–3 are only for **existing** resources.
+
+---
+
+## Step 2 — Remediate existing resources (adds the tag)
+
+```bash
+az policy remediation create \
+  --name "LegacyVMNVA-remediate" \
+  --policy-assignment "LegacyVMNVA-optout" \
+  --resource-group <resource-group-name>
+```
+
+See [Remediate non-compliant resources](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources). This covers individual VMs and VM Scale Set scenarios.
+
+> **Scoping caveat:** the built-in policy applies the tag only to **Marketplace NVA** publisher/product images (its display name is _"Configure Marketplace Network Virtual Appliances (NVAs) to add a MANA support tag"_). It will not auto-tag a non-NVA image. For NVAs acquired outside Marketplace or via a managed service, apply the tag through your own tooling / the vendor's process.
+
+---
+
+## Step 3 — Reapply to enable the tag (REQUIRED)
+
+The tag must be **enabled** via a reapply operation.
+
+**Standalone VM or VMSS Flex instance:**
+
+```bash
+az vm reapply --resource-group <resource-group-name> --name <vm-name>
+```
+
+**VMSS Uniform:**
+
+```bash
+az rest --method post \
+  --url "https://management.azure.com/subscriptions/<subscription-id>/resourceGroups/<resource-group-name>/providers/Microsoft.Compute/virtualMachineScaleSets/<vmss-name>/reapply?api-version=2025-11-01"
+```
+
+> The Accelerated Networking status of a VM does **not** affect whether the policy is applied.
+
+---
+
+## Step 4 — Verify
+
+**Check the tag on a VM:**
+
+```bash
+az vm show --resource-group <resource-group-name> --name <vm-name> --query "tags"
+```
+
+**Check policy compliance (portal):** VM → **Policy** tab, or the **Policy** blade → _compliant_ (tag applied) vs _noncompliant_ (not yet applied). The tag is also visible in the portal for IaaS VMs and VMSS.
+
+---
+
+## Step 5 — Roll back / migrate off the exception
+
+When your NVA is MANA-compatible:
+
+1. **Delete the policy assignment:**
+   ```bash
+   az policy assignment delete --name "LegacyVMNVA-optout" --scope "/subscriptions/<subscription-id>"
+   ```
+   For gradual rollback, update the policy **resource selector** to incrementally remove regions.
+2. **Remove the tag** from existing VMs (if it persists) and **redeploy** the VMs:
+   ```bash
+   az resource tag --ids <vm-resource-id> --tags   # re-set tags without LegacyVMNVA
+   ```
+3. For **ODCR** VMs, removing the tag + ensuring MANA compatibility **restores ODCR SLA eligibility**.
+
+> After **May 31, 2027**, the tag is no longer honored — no action required, but Microsoft recommends removing the policy assignment from all subscriptions.
+
+---
+
+## Exemptions (exclude specific resources/scopes)
+
+Use Azure Policy exemptions rather than editing the policy. See [Azure Policy exemption structure](https://learn.microsoft.com/en-us/azure/governance/policy/concepts/exemption-structure).
+
+---
+
+## Special scenarios
+
+- **NVA acquired outside Azure Marketplace:** work with the NVA provider so the tag is applied to existing and new deployments (deployment templates/mechanisms may need changes).
+- **Managed-service NVA:** work with the managed service provider on their tag-application process.
