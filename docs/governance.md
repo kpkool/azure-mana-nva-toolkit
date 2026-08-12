@@ -2,7 +2,7 @@
 
 Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances change versions, and Azure keeps expanding MANA and adding eligible sizes. This is the model to keep NVAs safe after the first pass.
 
-> Primary goal: **no NVA suffers a surprise networking regression from a MANA placement change — now or later.** The `LegacyVMNVA` tag is a *situational safeguard* within this loop, not the objective.
+> Primary goal: **no NVA suffers a surprise networking regression from a MANA placement change — now or later.** The `LegacyVMNVA` tag is a _situational safeguard_ within this loop, not the objective.
 
 ## The loop
 
@@ -15,33 +15,33 @@ Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances ch
 
 ## What to put in place
 
-| Control | Purpose | How |
-| --- | --- | --- |
-| **Scale enforcement** | New NVAs are safe by default | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`) |
-| **Continuous discovery** | Catch new/changed VMs & VMSS | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard |
-| **Drift alerting** | Flag an untagged AN NVA on an eligible size | ARG-backed alert via Azure Monitor / Logic App |
-| **Vendor register** | Compatibility is per vendor + version and changes | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner |
-| **Tag lifecycle** | Tag is a bridge, not a destination | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry |
-| **ODCR / SLA watch** | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility |
-| **Evidence & audit** | Prove due diligence | Retain `detect`/traffic outputs + policy compliance snapshots |
+| Control                  | Purpose                                                                       | How                                                                                                                               |
+| ------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| **Scale enforcement**    | New NVAs are safe by default                                                  | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`) |
+| **Continuous discovery** | Catch new/changed VMs & VMSS                                                  | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard                                                |
+| **Drift alerting**       | Flag an untagged AN NVA on an eligible size                                   | ARG-backed alert via Azure Monitor / Logic App                                                                                    |
+| **Vendor register**      | Compatibility is per vendor + version and changes                             | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner                          |
+| **Tag lifecycle**        | Tag is a bridge, not a destination                                            | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry                                                  |
+| **ODCR / SLA watch**     | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility                                                   |
+| **Evidence & audit**     | Prove due diligence                                                           | Retain `detect`/traffic outputs + policy compliance snapshots                                                                     |
 
 ## Timeline gates (act before these)
 
-| Date | Meaning |
-| --- | --- |
-| **May 26, 2026** | Earliest MANA placement — Cobalt 100 & Intel v5 (public cloud) |
-| **August 6, 2026** | Earliest MANA placement — Intel v1–v4 (public cloud) |
-| **May 31, 2027** | `LegacyVMNVA` tag **no longer honored** — all reliance must end before this |
+| Date               | Meaning                                                                     |
+| ------------------ | --------------------------------------------------------------------------- |
+| **May 26, 2026**   | Earliest MANA placement — Cobalt 100 & Intel v5 (public cloud)              |
+| **August 6, 2026** | Earliest MANA placement — Intel v1–v4 (public cloud)                        |
+| **May 31, 2027**   | `LegacyVMNVA` tag **no longer honored** — all reliance must end before this |
 
 ## Ownership (RACI, illustrative)
 
-| Activity | Responsible | Accountable | Consulted | Informed |
-| --- | --- | --- | --- | --- |
-| Inventory & drift scans | Infra Engineer | Infra Lead | Security | Architecture |
-| Verify NIC / vendor compatibility | Infra Engineer | Infra Architect | NVA vendor | Infra Lead |
-| Policy at scale + safeguard | Infra Architect | Infra Lead | Security / Governance | Engineers |
-| Migration to MANA-ready config | Infra Engineer | Infra Architect | NVA vendor | Infra Lead |
-| Reporting & audit | Infra Lead | Infra Lead | Security | Leadership |
+| Activity                          | Responsible     | Accountable     | Consulted             | Informed     |
+| --------------------------------- | --------------- | --------------- | --------------------- | ------------ |
+| Inventory & drift scans           | Infra Engineer  | Infra Lead      | Security              | Architecture |
+| Verify NIC / vendor compatibility | Infra Engineer  | Infra Architect | NVA vendor            | Infra Lead   |
+| Policy at scale + safeguard       | Infra Architect | Infra Lead      | Security / Governance | Engineers    |
+| Migration to MANA-ready config    | Infra Engineer  | Infra Architect | NVA vendor            | Infra Lead   |
+| Reporting & audit                 | Infra Lead      | Infra Lead      | Security              | Leadership   |
 
 ## Reporting (minimum)
 
