@@ -1,0 +1,67 @@
+// Azure Resource Graph — MANA/NVA readiness inventory (Virtual Machines)
+// Per VM: vendor, size, OS, NIC-accurate Accelerated Networking (AN), LegacyVMNVA tag, and a triage verdict.
+//
+// Fixes the multiple-NIC problem: NICs are summarized PER VM before the join, so a multi-NIC VM
+// produces exactly ONE row, and mixed AN across NICs is surfaced as "Partial (n/m)".
+//
+// Runs in Azure Resource Graph Explorer (portal) or via CLI:
+//   az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
+//     --query "data[].{VM:VMName,Vendor:Vendor,Size:VMSize,OS:OSType,NICs:NICCount,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment,RG:resourceGroup}" -o table
+//   (CLI needs: az extension add -n resource-graph)
+//
+// Scope: standalone VMs and VMSS Flex member instances (they surface as VMs). For VMSS Uniform, also run inventory-nva-vmss.kql.
+// ARG CAN see: publisher, size, OS, per-NIC AN flag, resource tags.
+// ARG CANNOT see: whether the VM is actually on MANA hardware (verify in-guest with detect-mana.sh),
+//   nor whether a present LegacyVMNVA tag has been ENABLED via a reapply operation.
+
+Resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| extend LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set")
+| project
+    vmId = tolower(id),
+    VMName = name,
+    VMSize = tostring(properties.hardwareProfile.vmSize),
+    Vendor = tostring(properties.storageProfile.imageReference.publisher),
+    Offer = tostring(properties.storageProfile.imageReference.offer),
+    Sku = tostring(properties.storageProfile.imageReference.sku),
+    OSType = tostring(properties.storageProfile.osDisk.osType),
+    LegacyVMNVATag,
+    resourceGroup,
+    subscriptionId,
+    location
+| join kind=leftouter (
+    Resources
+    | where type =~ 'microsoft.network/networkinterfaces'
+    | where isnotempty(properties.virtualMachine.id)
+    | project
+        vmId = tolower(tostring(properties.virtualMachine.id)),
+        AN = iff(properties.enableAcceleratedNetworking == true, 1, 0)
+    // one row per VM: total NICs and how many have Accelerated Networking
+    | summarize NICCount = count(), ANEnabledNICs = sum(AN) by vmId
+) on vmId
+| extend NICCount = coalesce(NICCount, 0), ANEnabledNICs = coalesce(ANEnabledNICs, 0)
+| extend AcceleratedNetworking = case(
+    NICCount == 0, "No NIC found",
+    ANEnabledNICs == 0, "Disabled",
+    ANEnabledNICs == NICCount, "Enabled",
+    strcat("Partial (", tostring(ANEnabledNICs), "/", tostring(NICCount), ")"))
+// Triage verdict — control-plane signal only; always confirm on-host before acting
+| extend Assessment = case(
+    NICCount == 0, "Review - no NIC data",
+    ANEnabledNICs == 0, "No action - AN disabled",
+    LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
+    "Candidate - verify on host (detect-mana.sh)")
+| project
+    subscriptionId,
+    resourceGroup,
+    VMName,
+    Vendor,
+    Offer,
+    Sku,
+    OSType,
+    VMSize,
+    NICCount,
+    AcceleratedNetworking,
+    LegacyVMNVATag,
+    Assessment
+| order by Assessment asc, Vendor asc, VMName asc
