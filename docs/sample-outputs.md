@@ -100,7 +100,7 @@ Signal 2 IRQs:  mlx5_comp0..3 + mlx5_async0@pci   (incrementing)
 delta rx_bytes on enP..s1     = 7,210,631
 ```
 
-**Verdict:** the netvsc `dmesg` line plus the driver-specific IRQ family attribute traffic to MANA vs ConnectX. The `vf_*` counters alone prove the path is *accelerated*, not *which* NIC — the driver / `dmesg` / IRQ names are the discriminator.
+**Verdict:** the netvsc `dmesg` line plus the driver-specific IRQ family attribute traffic to MANA vs ConnectX. The `vf_*` counters alone prove the path is _accelerated_, not _which_ NIC — the driver / `dmesg` / IRQ names are the discriminator.
 
 ---
 
