@@ -15,11 +15,11 @@ Use [`../scripts/inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql). Runs
 ```bash
 az extension add -n resource-graph            # one-time (CLI only)
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment, RG:resourceGroup}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Columns: **AN** (per-NIC accurate), **LegacyVMNVATag** (`True`/`Not set`), and **Assessment** (a triage verdict).
+Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **AN** (per-NIC accurate), **LegacyVMNVATag** (`True`/`Not set`), and **Assessment** (a triage verdict). The KQL always selects `subscriptionId` and `resourceGroup`; just keep them in the `--query` projection so every row is directly runnable.
 
 ## Why this differs from the common one-liner (multiple-NIC fix)
 
@@ -57,13 +57,15 @@ This toolkit's query **summarizes NICs per VM first**, then joins — so each VM
 ## Sample output (anonymized)
 
 ```
-VM         Size              AN        Tag      Verdict
----------  ----------------  --------  -------  ---------------------------------------------------------
-web-01     Standard_B4ms     Disabled  Not set  No action - AN disabled
-nva-fw-01  Standard_D4s_v5   Enabled   Not set  Candidate - verify on host (detect-mana.sh)
-nva-fw-02  Standard_D4s_v5   Partial   Not set  Candidate - verify on host (detect-mana.sh)
-nva-fw-03  Standard_D4s_v5   Enabled   True     Opt-out tag present - confirm reapply, then plan migration
+RG                VM         Size              AN        Tag      Verdict
+----------------  ---------  ----------------  --------  -------  ---------------------------------------------------------
+rg-net-01         web-01     Standard_B4ms     Disabled  Not set  No action - AN disabled
+rg-net-01         nva-fw-01  Standard_D4s_v5   Enabled   Not set  Candidate - verify on host (detect-mana.sh)
+rg-net-01         nva-fw-02  Standard_D4s_v5   Partial   Not set  Candidate - verify on host (detect-mana.sh)
+rg-net-01         nva-fw-03  Standard_D4s_v5   Enabled   True     Opt-out tag present - confirm reapply, then plan migration
 ```
+
+> The `Sub` (subscriptionId) column is omitted above only for page width — include `Sub:subscriptionId` in real runs (it is already selected by the KQL). With Sub + RG + VM on each row you can run Step 2 directly: `az account set --subscription <Sub>` then `az vm run-command -g <RG> -n <VM> ...`.
 
 ## VMSS (scale sets)
 
@@ -71,7 +73,7 @@ NVAs are often deployed as **VMSS**. Run [`../scripts/inventory-nva-vmss.kql`](.
 
 ```bash
 az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-  --query "data[].{VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment, RG:resourceGroup}" -o table
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
 ```
 
 - Covers **VMSS Uniform**; VMSS **Flex** instances already appear in the VM query.

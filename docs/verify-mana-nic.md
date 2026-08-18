@@ -84,6 +84,18 @@ ethtool -S eth0 | grep -E "^\s*vf_"
 
 If VF values are `0` or don't increment, you are **not** using the virtual function. (Note: `vf_*` counters exist on both MANA and ConnectX — they prove the accelerated data path, not MANA specifically. Confirm MANA via the driver/PCI checks above.)
 
+### 1e. Authoritative datapath (netvsc's own statement)
+
+```bash
+sudo dmesg | grep -i "Data path switched" | tail -n2
+```
+
+```
+hv_netvsc ... eth0: Data path switched to VF: ens1
+```
+
+The netvsc driver logs **which VF** the datapath is on. Combined with `ethtool -i <vf>` (`mana` vs `mlx5_core`), this is the definitive attribution of _which_ NIC carries traffic. To prove it live under load — and see driver-specific IRQs (`mana_q*` vs `mlx5_comp*`) and per-VF byte deltas — run [`../scripts/distinguish-vf-mana.sh`](../scripts/distinguish-vf-mana.sh). For a full per-VM verdict in one pass, run [`../scripts/validate-nva-mana.sh`](../scripts/validate-nva-mana.sh) (Linux) / [`../scripts/validate-nva-mana.ps1`](../scripts/validate-nva-mana.ps1) (Windows).
+
 ---
 
 ## 2. Windows

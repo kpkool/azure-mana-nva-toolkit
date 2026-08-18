@@ -6,7 +6,7 @@
 //
 // Runs in Azure Resource Graph Explorer (portal) or via CLI:
 //   az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-//     --query "data[].{VM:VMName,Vendor:Vendor,Size:VMSize,OS:OSType,NICs:NICCount,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment,RG:resourceGroup}" -o table
+//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VM:VMName,Vendor:Vendor,Size:VMSize,OS:OSType,NICs:NICCount,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
 //   (CLI needs: az extension add -n resource-graph)
 //
 // Scope: standalone VMs and VMSS Flex member instances (they surface as VMs). For VMSS Uniform, also run inventory-nva-vmss.kql.

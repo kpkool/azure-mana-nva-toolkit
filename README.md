@@ -71,28 +71,42 @@ See [docs/governance.md](./docs/governance.md) for the continuous-governance mod
 ```bash
 az extension add -n resource-graph            # one-time
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{VM:VMName, Vendor:Vendor, Size:VMSize, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Returns one row **per VM** (multi-NIC safe) with vendor, size, NIC-accurate AN, the **`LegacyVMNVA` tag**, and a **triage verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) for **scale sets** (AKS-aware). Details + the multiple-NIC fix: [docs/inventory-arg.md](./docs/inventory-arg.md). Both queries also run in **Azure Resource Graph Explorer** in the portal.
+Returns one row **per VM** (multi-NIC safe) with **Subscription + resource group + VM name** (the identity you feed straight into Step 2), vendor, size, NIC-accurate AN, the **`LegacyVMNVA` tag**, and a **triage verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) for **scale sets** (AKS-aware). Details + the multiple-NIC fix: [docs/inventory-arg.md](./docs/inventory-arg.md). Both queries also run in **Azure Resource Graph Explorer** in the portal.
 
 > ARG shows candidates only — it **cannot** confirm MANA hardware, nor that a tag was enabled via reapply. Do that in Step 2.
 
-## Step 2 — Is a given VM on MANA?
+## Step 2 — Is a given VM on MANA? (driver + traffic — the durable check)
 
-Run in-guest, or remotely with **no public IP / inbound SSH** via `az vm run-command`:
+The **`LegacyVMNVA` tag is a temporary workaround** (honored only to May 31, 2027). The **durable signal is on the host**: which driver is bound to the accelerated VF (`mana` vs `mlx5_core`) and whether traffic actually flows over it. Use the Sub + RG + VM from Step 1 to target each VM directly:
 
 ```bash
-az vm run-command invoke -g <rg> -n <vm> --command-id RunShellScript \
+az account set --subscription <Sub>          # from Step 1
+# Quick check (driver + lspci + VF counters):
+az vm run-command invoke -g <RG> -n <VM> --command-id RunShellScript \
   --scripts @scripts/detect-mana.sh --query "value[0].message" -o tsv
 ```
 
-**Windows** uses `RunPowerShellScript` + [scripts/detect-mana.ps1](./scripts/detect-mana.ps1):
+For a full per-VM verdict (tag + MANA hardware + driver + authoritative netvsc datapath + VF functioning), use the **validator**; to prove _which_ NIC carried live traffic under load, use the **distinguisher**:
 
 ```bash
-az vm run-command invoke -g <rg> -n <vm> --command-id RunPowerShellScript \
-  --scripts @scripts/detect-mana.ps1 --query "value[0].message" -o tsv
+# Full validator (Linux)
+az vm run-command invoke -g <RG> -n <VM> --command-id RunShellScript \
+  --scripts @scripts/validate-nva-mana.sh --query "value[0].message" -o tsv
+
+# Attribute live traffic to MANA vs Mellanox (flood-ping a second VM's private IP)
+az vm run-command invoke -g <RG> -n <VM> --command-id RunShellScript \
+  --scripts @scripts/distinguish-vf-mana.sh --parameters "<target-private-ip>" --query "value[0].message" -o tsv
+```
+
+**Windows** uses `RunPowerShellScript` + [scripts/detect-mana.ps1](./scripts/detect-mana.ps1) (quick) or [scripts/validate-nva-mana.ps1](./scripts/validate-nva-mana.ps1) (full):
+
+```bash
+az vm run-command invoke -g <RG> -n <VM> --command-id RunPowerShellScript \
+  --scripts @scripts/validate-nva-mana.ps1 --query "value[0].message" -o tsv
 ```
 
 Read the result:
@@ -102,7 +116,7 @@ Read the result:
 | `mana`                        | `Device 00ba`           | **On MANA**     |
 | `mlx5_core`                   | `Mellanox … ConnectX-5` | **Not on MANA** |
 
-Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-outputs.md](./docs/sample-outputs.md).
+The **authoritative** "which VF carries traffic" signal is the netvsc log line `hv_netvsc … eth0: Data path switched to VF: <name>` (`sudo dmesg | grep "Data path switched"`). The `vf_*` counters prove traffic is _accelerated_ but are identical on MANA and Mellanox — attribute to MANA via the driver/`dmesg`. Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-outputs.md](./docs/sample-outputs.md).
 
 > **Third-party appliances (Cisco, Palo Alto, Fortinet, Check Point, F5):** their OS has no standard shell, so `lspci`/`ethtool` won't run. Validate via the vendor's MANA/Accelerated Networking compatibility matrix + a support case, and the appliance's own CLI. See [docs/inventory-arg.md](./docs/inventory-arg.md#third-party-nvas-cisco-palo-alto-etc--non-windowslinux-images).
 
@@ -118,11 +132,19 @@ Real outputs (Linux + Windows, MANA vs not, traffic before/after): [docs/sample-
 | [docs/evidence-lab.md](./docs/evidence-lab.md)                             | Reproducible MVP lab: deploy, detect, capture traffic, compare MANA vs not    |
 | [docs/sample-outputs.md](./docs/sample-outputs.md)                         | Real (anonymized) script/query outputs: Linux, Windows, traffic, ARG          |
 | [docs/references.md](./docs/references.md)                                 | Public Microsoft references + verified key values                             |
-| [scripts/inventory-nva-vms.kql](./scripts/inventory-nva-vms.kql)           | Azure Resource Graph query — per-VM NIC + Accelerated Networking inventory    |
-| [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql)         | Azure Resource Graph query — VMSS inventory (AKS-aware, AN + tag + verdict)   |
-| [scripts/detect-mana.sh](./scripts/detect-mana.sh)                         | Detect MANA vs ConnectX on **Linux** (kernel, `lspci`, VF driver, counters)   |
-| [scripts/detect-mana.ps1](./scripts/detect-mana.ps1)                       | Detect MANA on **Windows** (`Get-NetAdapter`, `Get-PnpDevice`, stats)         |
-| [scripts/traffic-capture.sh](./scripts/traffic-capture.sh)                 | VF counter before/after a VM-to-VM flood ping                                 |
+
+**Scripts** (`scripts/`) — run in-guest or remotely via `az vm run-command` (no SSH/RDP):
+
+- **Inventory:** [`inventory-nva-vms.kql`](./scripts/inventory-nva-vms.kql), [`inventory-nva-vmss.kql`](./scripts/inventory-nva-vmss.kql) — candidates at scale (Sub + RG + VM per row).
+- **Quick detect:** [`detect-mana.sh`](./scripts/detect-mana.sh), [`detect-mana.ps1`](./scripts/detect-mana.ps1) — driver + `lspci` + VF counters.
+- **Full validator:** [`validate-nva-mana.sh`](./scripts/validate-nva-mana.sh), [`validate-nva-mana.ps1`](./scripts/validate-nva-mana.ps1) — tag + hardware + driver + netvsc datapath + functioning + verdict.
+- **Traffic attribution:** [`distinguish-vf-mana.sh`](./scripts/distinguish-vf-mana.sh) — proves MANA vs Mellanox under load (dmesg / IRQ / per-VF bytes).
+- **Traffic capture:** [`traffic-capture.sh`](./scripts/traffic-capture.sh) — VF counters before/after a flood ping.
+  | [scripts/inventory-nva-vms.kql](./scripts/inventory-nva-vms.kql) | Azure Resource Graph query — per-VM NIC + Accelerated Networking inventory |
+  | [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) | Azure Resource Graph query — VMSS inventory (AKS-aware, AN + tag + verdict) |
+  | [scripts/detect-mana.sh](./scripts/detect-mana.sh) | Detect MANA vs ConnectX on **Linux** (kernel, `lspci`, VF driver, counters) |
+  | [scripts/detect-mana.ps1](./scripts/detect-mana.ps1) | Detect MANA on **Windows** (`Get-NetAdapter`, `Get-PnpDevice`, stats) |
+  | [scripts/traffic-capture.sh](./scripts/traffic-capture.sh) | VF counter before/after a VM-to-VM flood ping |
 
 ## Recommended actions (summary)
 
