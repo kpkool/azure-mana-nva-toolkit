@@ -70,6 +70,40 @@ ping exit=0
 
 ---
 
+## 3b. Linux — full validator + traffic attribution (`scripts/validate-nva-mana.sh`, `scripts/distinguish-vf-mana.sh`)
+
+`validate-nva-mana.sh` — one-pass verdict (ON MANA), key lines:
+
+```
+== 4. MANA driver ==
+VF 'ens1' bound driver: mana
+[PASS] VF driver = mana -> MANA driver loaded and bound
+netvsc datapath (dmesg): hv_netvsc <guid> eth0: Data path switched to VF: ens1
+[PASS] netvsc reports datapath ON the VF (accelerated path active)
+== SUMMARY ==
+VERDICT: ON MANA, driver working. Validate NVA behavior; plan migration to MANA-optimized series.
+```
+
+On a ConnectX host the same script prints `VF driver = mlx5_core -> Mellanox/ConnectX (not MANA)` and `VERDICT: NOT on MANA`. The Windows `validate-nva-mana.ps1` prints the equivalent PASS/VERDICT via `Get-PnpDevice` + `Get-NetAdapter`.
+
+`distinguish-vf-mana.sh` — attributes the **same** flood-ping load to the correct NIC family under load:
+
+```
+# MANA VM  (VF ens1, driver mana)
+Signal 0 dmesg: eth0: Data path switched to VF: ens1
+Signal 2 IRQs:  mana_q0..q3 + mana_hwc@pci   (incrementing)
+delta rx_bytes on ens1        = 7,210,042
+
+# ConnectX VM  (VF enP..s1, driver mlx5_core)
+Signal 0 dmesg: eth0: Data path switched to VF: enP..s1
+Signal 2 IRQs:  mlx5_comp0..3 + mlx5_async0@pci   (incrementing)
+delta rx_bytes on enP..s1     = 7,210,631
+```
+
+**Verdict:** the netvsc `dmesg` line plus the driver-specific IRQ family attribute traffic to MANA vs ConnectX. The `vf_*` counters alone prove the path is *accelerated*, not *which* NIC — the driver / `dmesg` / IRQ names are the discriminator.
+
+---
+
 ## 4. Windows — ON MANA (`scripts/detect-mana.ps1`)
 
 ```
@@ -98,27 +132,27 @@ SentBytes     : 1001831
 
 ## 5. ARG inventory — success (`scripts/inventory-nva-vms.kql` + `inventory-nva-vmss.kql`)
 
-VMs:
+VMs (display projection includes **Sub + RG + Vendor + OS** — the `OS` column tells you whether to run the `.sh` or `.ps1` in the host check):
 
 ```
-VM         Size              AN        Tag      Verdict
----------  ----------------  --------  -------  ---------------------------------------------------------
-<vm-a>     Standard_D4s_v5   Enabled   Not set  Candidate - verify on host (detect-mana.sh)
-<vm-v6>    Standard_D4ds_v6  Enabled   Not set  Candidate - verify on host (detect-mana.sh)
-<vm-win>   Standard_B4ms     Disabled  Not set  No action - AN disabled
-<vm-tag>   Standard_D4s_v5   Enabled   True     Opt-out tag present - confirm reapply, then plan migration
+Sub    RG    VM        Vendor                  Size              OS       AN       Tag      Verdict
+-----  ----  --------  ----------------------  ----------------  -------  -------  -------  ---------------------------------------------------------
+<sub>  <rg>  <vm-a>    Canonical               Standard_D4s_v5   Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
+<sub>  <rg>  <vm-v6>   Canonical               Standard_D4ds_v6  Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
+<sub>  <rg>  <vm-tag>  Canonical               Standard_D4s_v5   Linux    Enabled  True     Opt-out tag present - confirm reapply, then plan migration
+<sub>  <rg>  <vm-win>  MicrosoftWindowsServer  Standard_D4ds_v6  Windows  Enabled  True     Opt-out tag present - confirm reapply, then plan migration
 ```
 
-VMSS (AKS-aware):
+VMSS (AKS-aware; illustrative):
 
 ```
-VMSS         Size               AN       Tag      Verdict
------------  -----------------  -------  -------  ---------------------------------------------
-<aks-pool>   Standard_D16ds_v5  Enabled  Not set  AKS-managed - not impacted by MANA (per docs)
-<nva-vmss>   Standard_D2ads_v5  Enabled  Not set  Candidate - verify on host (detect-mana.sh)
+Sub    RG    VMSS         Mode     Size               OS       AN       Tag      Verdict
+-----  ----  -----------  -------  -----------------  -------  -------  -------  ---------------------------------------------
+<sub>  <rg>  <aks-pool>   Uniform  Standard_D16ds_v5  Linux    Enabled  Not set  AKS-managed - not impacted by MANA (per docs)
+<sub>  <rg>  <nva-vmss>   Uniform  Standard_D2ads_v5  Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
 ```
 
-**Note:** ARG reports the control-plane signals (AN, tag, size). It does **not** confirm MANA hardware — always finish with the in-guest check (#1–#4).
+**Note:** the KQL always selects `subscriptionId` and `resourceGroup` (and OSType, Offer, Sku, location); the CLI `--query "data[].{...}"` is a client-side projection that decides which columns show. ARG reports control-plane signals (AN, tag, size, OS) only — it does **not** confirm MANA hardware; always finish with the in-guest check (#1–#3b).
 
 ---
 
