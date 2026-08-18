@@ -73,7 +73,7 @@ NVAs are often deployed as **VMSS**. Run [`../scripts/inventory-nva-vmss.kql`](.
 
 ```bash
 az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, Size:VMSize, OS:OSType, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
 ```
 
 - Covers **VMSS Uniform**; VMSS **Flex** instances already appear in the VM query.

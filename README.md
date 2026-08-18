@@ -71,21 +71,31 @@ See [docs/governance.md](./docs/governance.md) for the continuous-governance mod
 ```bash
 az extension add -n resource-graph            # one-time
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Returns one row **per VM** (multi-NIC safe) with **Subscription + resource group + VM name** (the identity you feed straight into Step 2), vendor, size, NIC-accurate AN, the **`LegacyVMNVA` tag**, and a **triage verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) for **scale sets** (AKS-aware). Details + the multiple-NIC fix: [docs/inventory-arg.md](./docs/inventory-arg.md). Both queries also run in **Azure Resource Graph Explorer** in the portal.
+Returns one row **per VM** (multi-NIC safe) with **Subscription + resource group + VM name** (the identity you feed straight into Step 2), **Vendor** (image publisher), size, **OS** (`Linux`/`Windows` — tells you whether to run the `.sh` or `.ps1` in Step 2), NIC-accurate AN, the **`LegacyVMNVA` tag**, and a **triage verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) for **scale sets** (AKS-aware). Details + the multiple-NIC fix: [docs/inventory-arg.md](./docs/inventory-arg.md). Both queries also run in **Azure Resource Graph Explorer** in the portal.
 
+> The KQL selects more columns than any one `--query` shows (Offer, Sku for OS version, location, etc.). The `--query` projection above is a **client-side filter** — in Resource Graph Explorer you'll see all fields; add/remove fields in `--query` to widen or narrow the CLI table.
 > ARG shows candidates only — it **cannot** confirm MANA hardware, nor that a tag was enabled via reapply. Do that in Step 2.
 
 ## Step 2 — Is a given VM on MANA? (driver + traffic — the durable check)
 
-The **`LegacyVMNVA` tag is a temporary workaround** (honored only to May 31, 2027). The **durable signal is on the host**: which driver is bound to the accelerated VF (`mana` vs `mlx5_core`) and whether traffic actually flows over it. Use the Sub + RG + VM from Step 1 to target each VM directly:
+The **`LegacyVMNVA` tag is a temporary workaround** (honored only to May 31, 2027). The **durable signal is on the host**: which driver is bound to the accelerated VF (`mana` vs `mlx5_core`) and whether traffic actually flows over it. Use the Sub + RG + VM from Step 1 to target each VM directly.
+
+**Pick the script by the `OS` column from Step 1** — the scripts are OS-specific because they call OS-native tools (`lspci`/`ethtool` on Linux; `Get-NetAdapter`/`Get-PnpDevice` on Windows):
+
+| OS (from Step 1) | `--command-id`        | Scripts to use                                                                  |
+| ---------------- | --------------------- | ------------------------------------------------------------------------------- |
+| **Linux**        | `RunShellScript`      | `detect-mana.sh`, `validate-nva-mana.sh`, `distinguish-vf-mana.sh` (`.sh` only) |
+| **Windows**      | `RunPowerShellScript` | `detect-mana.ps1`, `validate-nva-mana.ps1` (`.ps1` only)                        |
+
+So yes — **`.sh` runs on Linux exclusively, `.ps1` on Windows exclusively.** Running the wrong one fails (the tools don't exist on the other OS). Appliance OSes (PAN-OS, FortiOS, etc.) run neither — use the vendor matrix.
 
 ```bash
 az account set --subscription <Sub>          # from Step 1
-# Quick check (driver + lspci + VF counters):
+# Linux quick check (driver + lspci + VF counters):
 az vm run-command invoke -g <RG> -n <VM> --command-id RunShellScript \
   --scripts @scripts/detect-mana.sh --query "value[0].message" -o tsv
 ```

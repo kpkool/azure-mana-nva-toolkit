@@ -7,7 +7,7 @@
 //
 // Runs in Azure Resource Graph Explorer (portal) or via CLI:
 //   az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,Size:VMSize,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
+//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,Size:VMSize,OS:OSType,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
 //
 // ARG CANNOT see: whether instances are actually on MANA hardware (verify in-guest with detect-mana.sh),
 //   nor whether a present LegacyVMNVA tag has been ENABLED via a reapply operation.
