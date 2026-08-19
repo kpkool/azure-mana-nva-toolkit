@@ -48,13 +48,15 @@ Line
 
 # ---- 3. MANA driver installed (adapter exposed) ----
 "== 3. MANA driver (adapter) =="
-$mana = Get-NetAdapter | Where-Object InterfaceDescription -Like '*Microsoft Azure Network Adapter*'
-Get-NetAdapter | Select-Object Name,InterfaceDescription,Status,LinkSpeed | Format-Table -Auto | Out-String | Write-Output
+$adapters = Get-NetAdapter                       # cache once; reused in sections 3-5
+$mana = $adapters | Where-Object InterfaceDescription -Like '*Microsoft Azure Network Adapter*'
+$adapters | Select-Object Name,InterfaceDescription,Status,LinkSpeed | Format-Table -Auto | Out-String | Write-Output
 if ($mana) { Row 'PASS' "MANA adapter present and driver loaded: $($mana.InterfaceDescription)" }
 elseif ($onManaHw) { Row 'FAIL' 'On MANA hardware but MANA adapter NOT exposed -> driver missing -> NetVSC fallback. Install driver: https://aka.ms/manawindowsdrivers' }
 else { Row 'INFO' 'No MANA adapter (expected when not on MANA hardware)' }
-# Accelerated Networking present = a VF adapter other than the synthetic Hyper-V NIC (Mellanox VF or MANA)
-$accel = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Hyper-V Network Adapter' }
+# Accelerated Networking present = an SR-IOV VF from a known family (Mellanox ConnectX or MANA) -- positive match, not "not Hyper-V"
+$vfPattern = 'Mellanox|Microsoft Azure Network Adapter'
+$accel = $adapters | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -match $vfPattern }
 $anEnabled = [bool]$accel
 if     ($anEnabled -and -not $mana) { Row 'INFO' "Accelerated Networking active on non-MANA VF: $(@($accel)[0].InterfaceDescription)" }
 elseif (-not $anEnabled)            { Row 'INFO' 'Accelerated Networking not detected (no VF adapter) -> no MANA action' }
@@ -74,7 +76,7 @@ Line
 
 # ---- 5. Link sanity (extra tests) ----
 "== 5. Link sanity =="
-Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object Name,LinkSpeed,MtuSize,MacAddress | Format-Table -Auto | Out-String | Write-Output
+$adapters | Where-Object Status -eq 'Up' | Select-Object Name,LinkSpeed,MtuSize,MacAddress | Format-Table -Auto | Out-String | Write-Output
 Line
 
 # ---- SUMMARY VERDICT ----
