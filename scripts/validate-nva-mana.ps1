@@ -53,6 +53,11 @@ Get-NetAdapter | Select-Object Name,InterfaceDescription,Status,LinkSpeed | Form
 if ($mana) { Row 'PASS' "MANA adapter present and driver loaded: $($mana.InterfaceDescription)" }
 elseif ($onManaHw) { Row 'FAIL' 'On MANA hardware but MANA adapter NOT exposed -> driver missing -> NetVSC fallback. Install driver: https://aka.ms/manawindowsdrivers' }
 else { Row 'INFO' 'No MANA adapter (expected when not on MANA hardware)' }
+# Accelerated Networking present = a VF adapter other than the synthetic Hyper-V NIC (Mellanox VF or MANA)
+$accel = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -notmatch 'Hyper-V Network Adapter' }
+$anEnabled = [bool]$accel
+if     ($anEnabled -and -not $mana) { Row 'INFO' "Accelerated Networking active on non-MANA VF: $(@($accel)[0].InterfaceDescription)" }
+elseif (-not $anEnabled)            { Row 'INFO' 'Accelerated Networking not detected (no VF adapter) -> no MANA action' }
 Line
 
 # ---- 4. Adapter functioning (statistics) ----
@@ -74,7 +79,9 @@ Line
 
 # ---- SUMMARY VERDICT ----
 "== SUMMARY =="
-if     ($onManaHw -and $mana)      { 'VERDICT: ON MANA, driver working. Validate NVA behavior; plan migration to MANA-optimized series.' }
-elseif ($onManaHw -and -not $mana) { 'VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Install MANA driver (aka.ms/manawindowsdrivers); if NVA degrades keep LegacyVMNVA.' }
-else                               { 'VERDICT: NOT on MANA (Mellanox/ConnectX). Ensure LegacyVMNVA is applied+enabled before the earliest placement date.' }
+"(Reports hardware/driver/AN facts only. NVA-vs-general-workload classification comes from your vendor/CMDB; the LegacyVMNVA tag is only for AN-based NVAs, not general VMs.)"
+if     ($onManaHw -and $mana)      { 'VERDICT: ON MANA, driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series.' }
+elseif ($onManaHw -and -not $mana) { 'VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Install MANA driver (aka.ms/manawindowsdrivers); if this is an NVA that degrades, keep LegacyVMNVA.' }
+elseif (-not $anEnabled)           { 'VERDICT: Accelerated Networking DISABLED -> no MANA action required.' }
+else                               { 'VERDICT: NOT on MANA (on Mellanox/ConnectX). No action for general workloads. Apply LegacyVMNVA ONLY if this is an Accelerated-Networking NVA (firewall/router/SD-WAN) not yet confirmed MANA-compatible, before the earliest placement date.' }
 "####################################################"

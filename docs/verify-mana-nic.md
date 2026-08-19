@@ -153,9 +153,11 @@ Download: https://aka.ms/manawindowsdrivers (includes a readme with detailed ins
 
 ## Quick decision guide
 
-| Observation                                       | Meaning                                                   | Action                                                                      |
-| ------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
-| AN disabled                                       | Workload unaffected by MANA change                        | No action                                                                   |
-| VF driver `mana` + `00ba` + VF counters increment | On MANA, working                                          | Validate NVA behavior; migrate to MANA-compatible config                    |
-| `00ba` present, no accelerated VF exposed         | On MANA hardware, OS lacks MANA support → NetVSC fallback | Update OS/kernel or install driver; if NVA degrades, consider `LegacyVMNVA` |
-| VF driver `mlx5_core` / no `00ba`                 | Not on MANA (ConnectX)                                    | Prepare before earliest placement date                                      |
+| Observation                                       | Meaning                                                   | Action                                                                                    |
+| ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| AN disabled                                       | Workload unaffected by MANA change                        | No action                                                                                 |
+| VF driver `mana` + `00ba` + VF counters increment | On MANA, working                                          | General VM: no action. NVA: validate appliance behavior, consider a MANA-optimized series |
+| `00ba` present, no accelerated VF exposed         | On MANA hardware, OS lacks MANA support → NetVSC fallback | Update OS/kernel or install driver; if an NVA degrades, consider `LegacyVMNVA`            |
+| VF driver `mlx5_core` / no `00ba`                 | Not on MANA (ConnectX)                                    | General VM: no action. NVA: apply `LegacyVMNVA` before earliest placement date            |
+
+> The `LegacyVMNVA` tag is **only** for Accelerated-Networking NVAs (firewalls/routers/SD-WAN) not yet confirmed MANA-compatible. General workloads (app/web/db) need **no action** — MANA transition is transparent. These in-guest checks report hardware/driver/AN facts; NVA classification comes from the ARG vendor/publisher or your CMDB.

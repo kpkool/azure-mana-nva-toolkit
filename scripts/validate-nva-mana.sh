@@ -111,13 +111,14 @@ line
 
 # ---- SUMMARY VERDICT ----
 echo "== SUMMARY =="
+echo "(Reports hardware/driver/AN facts only. NVA-vs-general classification comes from your vendor/CMDB; LegacyVMNVA is only for AN-based NVAs, not general VMs.)"
 if [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" = "mana" ]; then
-  echo "VERDICT: ON MANA, driver working. Validate NVA behavior; plan migration to MANA-optimized series."
+  echo "VERDICT: ON MANA, driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series."
 elif [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" != "mana" ]; then
   echo "VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Update OS/kernel or install MANA driver; if NVA degrades keep LegacyVMNVA."
 elif [ -z "${VF:-}" ]; then
   echo "VERDICT: Accelerated Networking DISABLED -> no MANA action required."
 else
-  echo "VERDICT: NOT on MANA (Mellanox/ConnectX). Ensure LegacyVMNVA is applied+enabled before the earliest placement date."
+  echo "VERDICT: NOT on MANA (Mellanox/ConnectX). No action for general workloads. Apply LegacyVMNVA ONLY if this is an Accelerated-Networking NVA (firewall/router/SD-WAN) not yet confirmed MANA-compatible, before the earliest placement date."
 fi
 echo "####################################################"
