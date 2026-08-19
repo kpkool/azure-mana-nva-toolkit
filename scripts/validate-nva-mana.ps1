@@ -48,11 +48,18 @@ Line
 
 # ---- 3. MANA driver installed (adapter exposed) ----
 "== 3. MANA driver (adapter) =="
-$mana = Get-NetAdapter | Where-Object InterfaceDescription -Like '*Microsoft Azure Network Adapter*'
-Get-NetAdapter | Select-Object Name,InterfaceDescription,Status,LinkSpeed | Format-Table -Auto | Out-String | Write-Output
+$adapters = Get-NetAdapter                       # cache once; reused in sections 3-5
+$mana = $adapters | Where-Object InterfaceDescription -Like '*Microsoft Azure Network Adapter*'
+$adapters | Select-Object Name,InterfaceDescription,Status,LinkSpeed | Format-Table -Auto | Out-String | Write-Output
 if ($mana) { Row 'PASS' "MANA adapter present and driver loaded: $($mana.InterfaceDescription)" }
 elseif ($onManaHw) { Row 'FAIL' 'On MANA hardware but MANA adapter NOT exposed -> driver missing -> NetVSC fallback. Install driver: https://aka.ms/manawindowsdrivers' }
 else { Row 'INFO' 'No MANA adapter (expected when not on MANA hardware)' }
+# Accelerated Networking present = an SR-IOV VF from a known family (Mellanox ConnectX or MANA) -- positive match, not "not Hyper-V"
+$vfPattern = 'Mellanox|Microsoft Azure Network Adapter'
+$accel = $adapters | Where-Object { $_.Status -eq 'Up' -and $_.InterfaceDescription -match $vfPattern }
+$anEnabled = [bool]$accel
+if     ($anEnabled -and -not $mana) { Row 'INFO' "Accelerated Networking active on non-MANA VF: $(@($accel)[0].InterfaceDescription)" }
+elseif (-not $anEnabled)            { Row 'INFO' 'Accelerated Networking not detected (no VF adapter) -> no MANA action' }
 Line
 
 # ---- 4. Adapter functioning (statistics) ----
@@ -69,12 +76,14 @@ Line
 
 # ---- 5. Link sanity (extra tests) ----
 "== 5. Link sanity =="
-Get-NetAdapter | Where-Object Status -eq 'Up' | Select-Object Name,LinkSpeed,MtuSize,MacAddress | Format-Table -Auto | Out-String | Write-Output
+$adapters | Where-Object Status -eq 'Up' | Select-Object Name,LinkSpeed,MtuSize,MacAddress | Format-Table -Auto | Out-String | Write-Output
 Line
 
 # ---- SUMMARY VERDICT ----
 "== SUMMARY =="
-if     ($onManaHw -and $mana)      { 'VERDICT: ON MANA, driver working. Validate NVA behavior; plan migration to MANA-optimized series.' }
-elseif ($onManaHw -and -not $mana) { 'VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Install MANA driver (aka.ms/manawindowsdrivers); if NVA degrades keep LegacyVMNVA.' }
-else                               { 'VERDICT: NOT on MANA (Mellanox/ConnectX). Ensure LegacyVMNVA is applied+enabled before the earliest placement date.' }
+"(Reports hardware/driver/AN facts only. NVA-vs-general-workload classification comes from your vendor/CMDB; the LegacyVMNVA tag is only for AN-based NVAs, not general VMs.)"
+if     ($onManaHw -and $mana)      { 'VERDICT: ON MANA, driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series.' }
+elseif ($onManaHw -and -not $mana) { 'VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Install MANA driver (aka.ms/manawindowsdrivers); if this is an NVA that degrades, keep LegacyVMNVA.' }
+elseif (-not $anEnabled)           { 'VERDICT: Accelerated Networking DISABLED -> no MANA action required.' }
+else                               { 'VERDICT: NOT on MANA (on Mellanox/ConnectX). No action for general workloads. Apply LegacyVMNVA ONLY if this is an Accelerated-Networking NVA (firewall/router/SD-WAN) not yet confirmed MANA-compatible, before the earliest placement date.' }
 "####################################################"

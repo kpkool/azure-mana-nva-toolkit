@@ -81,7 +81,7 @@ VF 'ens1' bound driver: mana
 netvsc datapath (dmesg): hv_netvsc <guid> eth0: Data path switched to VF: ens1
 [PASS] netvsc reports datapath ON the VF (accelerated path active)
 == SUMMARY ==
-VERDICT: ON MANA, driver working. Validate NVA behavior; plan migration to MANA-optimized series.
+VERDICT: ON MANA, driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series.
 ```
 
 On a ConnectX host the same script prints `VF driver = mlx5_core -> Mellanox/ConnectX (not MANA)` and `VERDICT: NOT on MANA`. The Windows `validate-nva-mana.ps1` prints the equivalent PASS/VERDICT via `Get-PnpDevice` + `Get-NetAdapter`.
