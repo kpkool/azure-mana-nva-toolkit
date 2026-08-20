@@ -10,7 +10,7 @@
 //
 // Runs in Azure Resource Graph Explorer (portal) or via CLI:
 //   az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,NVA:NVAVendor,ImageSource:ImageSource,OS:OSType,OSVersion:OSVersion,Size:VMSize,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
+//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,NVA:NVAClass,ImageSource:ImageSource,OS:OSType,OSVersion:OSVersion,Size:VMSize,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
 //
 // ARG CANNOT see: whether instances are on MANA hardware (verify in-guest with detect-mana.sh /
 //   validate-nva-mana.*), nor whether a present LegacyVMNVA tag has been ENABLED via a reapply.
@@ -43,24 +43,34 @@ Resources
     isnotempty(ImgPublisher), "Platform",
     "Custom/VHD")
 // Known NVA publishers = snapshot of the built-in LegacyVMNVA policy default publisher allow-list
-// (policy e87a87f5-e6dd-4919-be21-abb0a4ea4630). Re-verify against the live policy for the current set.
+// (policy e87a87f5-e6dd-4919-be21-abb0a4ea4630). a10networks*/zscaler* are prefix wildcards.
+// Re-verify against the live policy for the current set.
 | extend _nvaPublishers = dynamic([
-    'arista-networks','avi-networks','aviatrix-systems','barracudanetworks','bluecat','checkpoint',
-    'cisco','citrix','cohesive','f5-networks','fortinet','haproxy-technologies','heimdall-data',
-    'hillstone-networks','imperva','ivanti-vadc','juniper-networks','kemptech','netapp','netgate',
-    'netskope','nttltd','paloaltonetworks','pulse-secure','radware','riverbed','silver-peak-systems',
-    'sonicwall-inc','sophos','trendmicro','twistlock','velocloud','versanetworks','vmware-inc',
-    'watchguard-technologies'])
-| extend _vendorLower = tolower(Vendor)
-| extend NVAVendor = iff(
-    set_has_element(_nvaPublishers, _vendorLower) or _vendorLower startswith 'a10networks' or _vendorLower startswith 'zscaler',
-    "Yes (policy-scoped)", "No / unknown")
+    'arista-networks','asdivertissementinc1617837708654','avi-networks','aviatrix-systems',
+    'barracudanetworks','bluecat','checkpoint','cisco','citrix','cohesive',
+    'daceitdbasensetrafficpulse1579892024934','ergoninformatikag1581586464404','f5-networks',
+    'fatalsecurity1604924013537','fortinet','haproxy-technologies','heimdall-data','hillstone-networks',
+    'imperva','ivanti-vadc','juniper-networks','kemptech','netapp','netgate','netskope','nttltd',
+    'paloaltonetworks','pulse-secure','radware','riverbed','silver-peak-systems','sonicwall-inc',
+    'sophos','technicheltd1606969724100','trendmicro','twistlock','velocloud','versanetworks',
+    'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
+| extend _pubLower = tolower(trim(' ', Vendor))
+| extend _policyScoped = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
+| extend _hay = tolower(strcat(Vendor, ' ', PlanProduct, ' ', Offer, ' ', Sku, ' ', name))
+| extend _kwHit = _hay matches regex 'firewall|fortinet|fortigate|palo ?alto|pan-?os|check ?point|cisco|f5|big-?ip|barracuda|sonicwall|sophos|watchguard|zscaler|netskope|versa|velocloud|sd-?wan|ngfw|aviatrix|arista|juniper|netscaler|imperva|radware|riverbed|silver-?peak|els?ity'
+// NVAClass -- 5-state so NO vendor is silently skipped (see inventory-nva-vms.kql for details).
+| extend NVAClass = case(
+    _policyScoped, "Policy-scoped NVA (auto-tag)",
+    isnotempty(PlanPublisher), "Marketplace - not in policy list (review)",
+    _kwHit, "Possible NVA - keyword hint (review)",
+    ImageSource in ("Gallery/Custom","Custom/VHD"), "Custom/unknown image (review)",
+    "General (platform OS)")
 | extend NICConfigCount = array_length(nicConfigs)
 | mv-expand nic = nicConfigs
 | extend ANnic = iff(tobool(nic.properties.enableAcceleratedNetworking) == true, 1, 0)
 | summarize ANEnabledNICs = sum(ANnic), NICConfigCount = max(NICConfigCount)
     by subscriptionId, resourceGroup, VMSSName = name, OrchestrationMode, Vendor, PlanPublisher, PlanProduct,
-       NVAVendor, ImageSource, OSType, OSVersion, VMSize, Capacity, LegacyVMNVATag, AKSCluster, location
+       NVAClass, ImageSource, OSType, OSVersion, VMSize, Capacity, LegacyVMNVATag, AKSCluster, location
 | extend AcceleratedNetworking = case(
     isnull(NICConfigCount) or NICConfigCount == 0, "No NIC config",
     ANEnabledNICs == 0, "Disabled",
@@ -73,8 +83,10 @@ Resources
     isnull(NICConfigCount) or NICConfigCount == 0, "Review - no NIC config",
     ANEnabledNICs == 0, "No action - AN disabled",
     LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
-    NVAVendor startswith "Yes", "NVA (policy-scoped vendor) - validate on host; tag if not MANA-ready",
-    ImageSource in ("Marketplace","Gallery/Custom","Custom/VHD"), "AN non-platform image - verify on host; if it is an NVA not in policy scope, tag manually",
+    NVAClass == "Policy-scoped NVA (auto-tag)", "NVA (policy-scoped) - validate on host; policy auto-tags in scope",
+    NVAClass startswith "Marketplace", "Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready",
+    NVAClass startswith "Possible", "Possible NVA (keyword hint) - verify on host; tag manually if it is an NVA",
+    NVAClass startswith "Custom", "Unknown/custom image - verify on host; tag manually if it is an NVA",
     "AN general VMSS - verify on host (likely no action)")
 | project
     subscriptionId,
@@ -84,7 +96,7 @@ Resources
     Vendor,
     PlanPublisher,
     PlanProduct,
-    NVAVendor,
+    NVAClass,
     ImageSource,
     OSType,
     OSVersion,

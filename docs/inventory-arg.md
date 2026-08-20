@@ -15,11 +15,13 @@ Use [`../scripts/inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql). Runs
 ```bash
 az extension add -n resource-graph            # one-time (CLI only)
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, NVA:NVAVendor, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, NVA:NVAClass, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **Vendor** (Marketplace plan publisher first, else image publisher), **NVAVendor** (`Yes (policy-scoped)` if the vendor is in the built-in policy's publisher allow-list), **ImageSource** (`Marketplace` / `Gallery/Custom` / `Platform` / `Custom/VHD`), **OS + OSVersion**, **AN** (per-NIC accurate), **LegacyVMNVATag**, and **Assessment**. The full column list (incl. `PlanPublisher`, `PlanProduct`, `Offer`, `Sku`) is documented in the KQL header — widen the `--query` projection to show more.
+Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **Vendor** (Marketplace plan publisher first, else image publisher), **NVAClass** (5-state — see below), **ImageSource** (`Marketplace` / `Gallery/Custom` / `Platform` / `Custom/VHD`), **OS + OSVersion**, **AN** (per-NIC accurate), **LegacyVMNVATag**, and **Assessment**. The full column list (incl. `PlanPublisher`, `PlanProduct`, `Offer`, `Sku`) is documented in the KQL header — widen the `--query` projection to show more.
+
+> **Enumerate every vendor (safety net):** [`../scripts/discover-vendors.kql`](../scripts/discover-vendors.kql) lists **all** distinct Vendor / PlanPublisher / PlanProduct / OS / ImageSource across VMs + VMSS with counts and a `PolicyScoped` flag — so no vendor is silently skipped. Review every `PolicyScoped=No` row.
 
 ## Why this differs from the common one-liner (multiple-NIC fix)
 
@@ -48,7 +50,7 @@ This toolkit's query **summarizes NICs per VM first**, then joins — so each VM
 ## Interpreting results
 
 - **Vendor** = the **Marketplace plan publisher** if present (this is what the built-in `LegacyVMNVA` policy matches), else the image publisher; `unknown/custom` for gallery/VHD images.
-- **NVAVendor = `Yes (policy-scoped)`** → the vendor is in the built-in policy's publisher allow-list, so the policy **can auto-tag** it (e.g., `paloaltonetworks`, `fortinet`, `checkpoint`). **`No / unknown`** → not policy-scoped; if it's still an NVA (unlisted vendor or custom image), you must **tag manually**.
+- **NVAClass** — 5-state so nothing is silently skipped: **`Policy-scoped NVA (auto-tag)`** (vendor in the policy allow-list → policy can auto-tag, e.g. `paloaltonetworks`), **`Marketplace - not in policy list (review)`** (a Marketplace NVA the policy will NOT tag — tag manually), **`Possible NVA - keyword hint (review)`** (name/product matches an NVA keyword), **`Custom/unknown image (review)`** (gallery/VHD — unidentifiable from metadata; check on host/CMDB), **`General (platform OS)`** (a normal platform-image VM — typically no action).
 - **ImageSource** → `Marketplace` (policy can auto-tag in-scope publishers), or `Gallery/Custom` / `Platform` / `Custom/VHD` (the policy will **not** auto-tag — tag manually if it's an NVA).
 - **AN = Disabled** → no MANA action needed for that VM.
 - **AN = Enabled / Partial** on a MANA-eligible size → verify on the host with `scripts/detect-mana.sh` / `validate-nva-mana.*`.
@@ -74,7 +76,7 @@ NVAs are often deployed as **VMSS**. Run [`../scripts/inventory-nva-vmss.kql`](.
 
 ```bash
 az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, NVA:NVAVendor, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, NVA:NVAClass, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
 ```
 
 - Covers **VMSS Uniform**; VMSS **Flex** instances already appear in the VM query.

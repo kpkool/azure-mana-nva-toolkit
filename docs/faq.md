@@ -24,7 +24,7 @@ No. A VM stays on its current hardware until an action re-runs allocation — a 
 
 ## ⭐ If Accelerated Networking is DISABLED on a VM or NVA, what action is required?
 
-**None.** Per Microsoft Learn: *"If Accelerated Networking is not enabled on your VM, no action is required. While your VM may still be placed on MANA-capable hardware, your workload will continue to run as expected without changes."*
+**None.** Per Microsoft Learn: _"If Accelerated Networking is not enabled on your VM, no action is required. While your VM may still be placed on MANA-capable hardware, your workload will continue to run as expected without changes."_
 
 - AN is a **per-NIC** setting, so **yes, an NVA can have AN disabled** on some or all NICs (though NVAs usually enable AN on data-path NICs for throughput).
 - With AN disabled there is **no SR-IOV Virtual Function and no MANA driver dependency**, so MANA placement is a non-event for that NIC/VM.

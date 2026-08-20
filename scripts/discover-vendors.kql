@@ -1,0 +1,65 @@
+// =============================================================================
+// Azure Resource Graph -- Vendor / Publisher / Plan / OS discovery (safety net)
+// =============================================================================
+// Purpose: list EVERY distinct vendor + Marketplace plan + OS across all accessible VMs and VMSS,
+// with VM counts and a policy-scope flag -- so NO vendor is silently skipped by the classifier.
+// Use this alongside inventory-nva-vms.kql / inventory-nva-vmss.kql: the inventory queries CLASSIFY,
+// this query ENUMERATES so a human can eyeball unknown / unlisted / custom vendors and decide.
+//
+// One row per distinct (Vendor, PlanPublisher, PlanProduct, OSType, ImageSource, PolicyScoped),
+// with VMCount and AN-enabled count.
+//
+// Runs in Azure Resource Graph Explorer (portal) or via CLI:
+//   az graph query -q "@scripts/discover-vendors.kql" --first 1000 -o table
+//   (CLI needs: az extension add -n resource-graph)
+//
+// Columns:
+//   Vendor        -- Marketplace plan publisher first, else image publisher, else unknown/custom.
+//   PlanPublisher / PlanProduct -- Marketplace fields the LegacyVMNVA policy matches on.
+//   OSType, OSVersion -- guest OS and image offer/sku.
+//   ImageSource   -- Marketplace | Gallery/Custom | Platform | Custom/VHD.
+//   PolicyScoped  -- Yes if the vendor is in the built-in policy publisher allow-list (auto-tag).
+//   VMCount       -- how many VM/VMSS resources share this vendor/plan/OS combination.
+//   ResourceTypes -- VM and/or VMSS.
+// Review every row where PolicyScoped=No -- those are the potential blind spots (unlisted Marketplace,
+// gallery/custom/VHD, or unknown vendors). Cross-check against the vendor's MANA-compatibility matrix.
+// =============================================================================
+
+resources
+| where type in~ ('microsoft.compute/virtualmachines','microsoft.compute/virtualmachinescalesets')
+| extend isVMSS = (type =~ 'microsoft.compute/virtualmachinescalesets')
+| extend img = iff(isVMSS, properties.virtualMachineProfile.storageProfile.imageReference, properties.storageProfile.imageReference)
+| extend osDisk = iff(isVMSS, properties.virtualMachineProfile.storageProfile.osDisk, properties.storageProfile.osDisk)
+| extend
+    ImgPublisher   = tostring(img.publisher),
+    Offer          = tostring(img.offer),
+    Sku            = tostring(img.sku),
+    GalleryImageId = tostring(img.id),
+    PlanPublisher  = tostring(plan.publisher),
+    PlanProduct    = tostring(plan.product),
+    PlanName       = tostring(plan.name),
+    OSType         = tostring(osDisk.osType)
+| extend Vendor = iff(isnotempty(PlanPublisher), PlanPublisher, iff(isnotempty(ImgPublisher), ImgPublisher, "unknown/custom"))
+| extend OSVersion = iff(isnotempty(Sku), strcat(Offer, " / ", Sku), "custom image (no publisher/sku)")
+| extend ImageSource = case(
+    isnotempty(PlanName), "Marketplace",
+    isnotempty(GalleryImageId), "Gallery/Custom",
+    isnotempty(ImgPublisher), "Platform",
+    "Custom/VHD")
+| extend _nvaPublishers = dynamic([
+    'arista-networks','asdivertissementinc1617837708654','avi-networks','aviatrix-systems',
+    'barracudanetworks','bluecat','checkpoint','cisco','citrix','cohesive',
+    'daceitdbasensetrafficpulse1579892024934','ergoninformatikag1581586464404','f5-networks',
+    'fatalsecurity1604924013537','fortinet','haproxy-technologies','heimdall-data','hillstone-networks',
+    'imperva','ivanti-vadc','juniper-networks','kemptech','netapp','netgate','netskope','nttltd',
+    'paloaltonetworks','pulse-secure','radware','riverbed','silver-peak-systems','sonicwall-inc',
+    'sophos','technicheltd1606969724100','trendmicro','twistlock','velocloud','versanetworks',
+    'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
+| extend _pubLower = tolower(trim(' ', Vendor))
+| extend PolicyScoped = iff(
+    set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler',
+    "Yes", "No")
+| summarize VMCount = count(), ResourceTypes = make_set(iff(isVMSS,'VMSS','VM'))
+    by Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PolicyScoped
+| project Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PolicyScoped, VMCount, ResourceTypes
+| order by PolicyScoped asc, VMCount desc, Vendor asc
