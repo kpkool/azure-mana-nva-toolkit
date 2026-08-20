@@ -132,27 +132,29 @@ SentBytes     : 1001831
 
 ## 5. ARG inventory — success (`scripts/inventory-nva-vms.kql` + `inventory-nva-vmss.kql`)
 
-VMs (display projection includes **Sub + RG + Vendor + OS** — the `OS` column tells you whether to run the `.sh` or `.ps1` in the host check):
+VMs — enriched with **Vendor (plan-publisher aware), NVAVendor, ImageSource, OS + OSVersion**. `NVAVendor` = `Yes (policy-scoped)` means the built-in `LegacyVMNVA` policy can auto-tag it; `OS` tells you `.sh` vs `.ps1`:
 
 ```
-Sub    RG    VM        Vendor                  Size              OS       AN       Tag      Verdict
------  ----  --------  ----------------------  ----------------  -------  -------  -------  ---------------------------------------------------------
-<sub>  <rg>  <vm-a>    Canonical               Standard_D4s_v5   Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
-<sub>  <rg>  <vm-v6>   Canonical               Standard_D4ds_v6  Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
-<sub>  <rg>  <vm-tag>  Canonical               Standard_D4s_v5   Linux    Enabled  True     Opt-out tag present - confirm reapply, then plan migration
-<sub>  <rg>  <vm-win>  MicrosoftWindowsServer  Standard_D4ds_v6  Windows  Enabled  True     Opt-out tag present - confirm reapply, then plan migration
+VM        Vendor            NVA                 ImageSource     OS       OSVersion                           AN       Tag      Verdict
+--------  ----------------  ------------------  --------------  -------  ----------------------------------  -------  -------  ------------------------------------------------------------
+web-01    canonical         No / unknown        Platform        Linux    ubuntu-24_04-lts / server           Disabled Not set  No action - AN disabled
+nva-fw-01 paloaltonetworks  Yes (policy-scoped) Marketplace     Linux    vmseries-flex / byol                Enabled  Not set  NVA (policy-scoped vendor) - validate on host; tag if not MANA-ready
+nva-el-01 unknown/custom    No / unknown        Gallery/Custom  Linux    custom image (no publisher/sku)     Enabled  Not set  AN non-platform image - verify on host; if NVA not in policy scope, tag manually
+app-01    canonical         No / unknown        Platform        Linux    ubuntu-24_04-lts / server           Enabled  Not set  AN general VM - verify on host (likely no action)
+win-01    microsoftwindows… No / unknown        Platform        Windows  WindowsServer / 2022-datacenter-g2  Enabled  True     Opt-out tag present - confirm reapply, then plan migration
 ```
 
-VMSS (AKS-aware; illustrative):
+VMSS (AKS-aware) — **real captured output** (anonymized), showing AKS auto-excluded and a general Ubuntu VMSS:
 
 ```
-Sub    RG    VMSS         Mode     Size               OS       AN       Tag      Verdict
------  ----  -----------  -------  -----------------  -------  -------  -------  ---------------------------------------------
-<sub>  <rg>  <aks-pool>   Uniform  Standard_D16ds_v5  Linux    Enabled  Not set  AKS-managed - not impacted by MANA (per docs)
-<sub>  <rg>  <nva-vmss>   Uniform  Standard_D2ads_v5  Linux    Enabled  Not set  Candidate - verify on host (detect-mana.sh)
+VMSS                          Mode     Vendor          NVA           ImageSource     OS     OSVersion                        AN       Verdict
+----------------------------  -------  --------------  ------------  --------------  -----  -------------------------------  -------  ---------------------------------------------------
+aks-systempool-...-vmss       Uniform  unknown/custom  No / unknown  Gallery/Custom  Linux  custom image (no publisher/sku)  Enabled  AKS-managed - not impacted by MANA (per docs)
+aks-userpool-...-vmss         Uniform  unknown/custom  No / unknown  Gallery/Custom  Linux  custom image (no publisher/sku)  Enabled  AKS-managed - not impacted by MANA (per docs)
+devops-vmss                   Uniform  canonical       No / unknown  Platform        Linux  ubuntu-24_04-lts / server        Enabled  AN general VMSS - verify on host (likely no action)
 ```
 
-**Note:** the KQL always selects `subscriptionId` and `resourceGroup` (and OSType, Offer, Sku, location); the CLI `--query "data[].{...}"` is a client-side projection that decides which columns show. ARG reports control-plane signals (AN, tag, size, OS) only — it does **not** confirm MANA hardware; always finish with the in-guest check (#1–#3b).
+**Note:** the KQL always selects `subscriptionId` and `resourceGroup` (plus PlanPublisher, PlanProduct, Offer, Sku, location); the CLI `--query "data[].{...}"` is a client-side projection deciding which columns show. `Vendor` prefers the **Marketplace plan publisher** (what the policy matches), not `imageReference.publisher`. ARG reports control-plane signals only — it does **not** confirm MANA hardware; always finish with the in-guest check (#1–#3b).
 
 ---
 

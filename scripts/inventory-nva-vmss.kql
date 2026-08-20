@@ -1,56 +1,93 @@
-// Azure Resource Graph — MANA/NVA readiness inventory (Virtual Machine Scale Sets)
-// NVAs are frequently deployed as VMSS. This complements inventory-nva-vms.kql (which covers
-// standalone VMs and VMSS Flex member instances). Run BOTH for full coverage.
+// =============================================================================
+// Azure Resource Graph -- MANA / NVA readiness inventory (Virtual Machine Scale Sets)
+// =============================================================================
+// NVAs are frequently deployed as VMSS. Complements inventory-nva-vms.kql (standalone VMs +
+// VMSS Flex member instances). Run BOTH for full coverage.
 //
-// Per VMSS: orchestration mode, vendor, size, capacity, Accelerated Networking (across NIC configs),
-// LegacyVMNVA tag, and a triage verdict.
+// Per VMSS: orchestration mode, vendor (plan-publisher aware), NVA-vendor flag, image source,
+// OS + OS version, size, capacity, NIC-config-accurate Accelerated Networking, LegacyVMNVA tag,
+// AKS awareness, and a triage verdict. Column meanings match inventory-nva-vms.kql.
 //
 // Runs in Azure Resource Graph Explorer (portal) or via CLI:
 //   az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,Size:VMSize,OS:OSType,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
+//     --query "data[].{Sub:subscriptionId,RG:resourceGroup,VMSS:VMSSName,Mode:OrchestrationMode,Vendor:Vendor,NVA:NVAVendor,ImageSource:ImageSource,OS:OSType,OSVersion:OSVersion,Size:VMSize,Capacity:Capacity,AN:AcceleratedNetworking,Tag:LegacyVMNVATag,Verdict:Assessment}" -o table
 //
-// ARG CANNOT see: whether instances are actually on MANA hardware (verify in-guest with detect-mana.sh),
-//   nor whether a present LegacyVMNVA tag has been ENABLED via a reapply operation.
+// ARG CANNOT see: whether instances are on MANA hardware (verify in-guest with detect-mana.sh /
+//   validate-nva-mana.*), nor whether a present LegacyVMNVA tag has been ENABLED via a reapply.
+// =============================================================================
 
 Resources
 | where type =~ 'microsoft.compute/virtualmachinescalesets'
-| extend LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set")
-| extend AKSCluster = tostring(tags['aks-managed-cluster-name'])
+| extend img = properties.virtualMachineProfile.storageProfile.imageReference   // plan is a TOP-LEVEL resource property
 | extend
     OrchestrationMode = tostring(properties.orchestrationMode),
-    Vendor = tostring(properties.virtualMachineProfile.storageProfile.imageReference.publisher),
-    Offer = tostring(properties.virtualMachineProfile.storageProfile.imageReference.offer),
-    Sku = tostring(properties.virtualMachineProfile.storageProfile.imageReference.sku),
-    OSType = tostring(properties.virtualMachineProfile.storageProfile.osDisk.osType),
-    VMSize = tostring(sku['name']),
-    Capacity = toint(sku['capacity']),
-    nicConfigs = properties.virtualMachineProfile.networkProfile.networkInterfaceConfigurations
+    ImgPublisher   = tostring(img.publisher),
+    Offer          = tostring(img.offer),
+    Sku            = tostring(img.sku),
+    GalleryImageId = tostring(img.id),
+    PlanPublisher  = tostring(plan.publisher),
+    PlanProduct    = tostring(plan.product),
+    PlanName       = tostring(plan.name),
+    OSType         = tostring(properties.virtualMachineProfile.storageProfile.osDisk.osType),
+    VMSize         = tostring(sku['name']),
+    Capacity       = toint(sku['capacity']),
+    LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set"),
+    AKSCluster     = tostring(tags['aks-managed-cluster-name']),
+    nicConfigs     = properties.virtualMachineProfile.networkProfile.networkInterfaceConfigurations
+// Vendor: prefer Marketplace PLAN publisher (what the policy matches); else image publisher.
+| extend Vendor = iff(isnotempty(PlanPublisher), PlanPublisher, iff(isnotempty(ImgPublisher), ImgPublisher, "unknown/custom"))
+| extend OSVersion = iff(isnotempty(Sku), strcat(Offer, " / ", Sku), "custom image (no publisher/sku)")
+| extend ImageSource = case(
+    isnotempty(PlanName), "Marketplace",
+    isnotempty(GalleryImageId), "Gallery/Custom",
+    isnotempty(ImgPublisher), "Platform",
+    "Custom/VHD")
+// Known NVA publishers = snapshot of the built-in LegacyVMNVA policy default publisher allow-list
+// (policy e87a87f5-e6dd-4919-be21-abb0a4ea4630). Re-verify against the live policy for the current set.
+| extend _nvaPublishers = dynamic([
+    'arista-networks','avi-networks','aviatrix-systems','barracudanetworks','bluecat','checkpoint',
+    'cisco','citrix','cohesive','f5-networks','fortinet','haproxy-technologies','heimdall-data',
+    'hillstone-networks','imperva','ivanti-vadc','juniper-networks','kemptech','netapp','netgate',
+    'netskope','nttltd','paloaltonetworks','pulse-secure','radware','riverbed','silver-peak-systems',
+    'sonicwall-inc','sophos','trendmicro','twistlock','velocloud','versanetworks','vmware-inc',
+    'watchguard-technologies'])
+| extend _vendorLower = tolower(Vendor)
+| extend NVAVendor = iff(
+    set_has_element(_nvaPublishers, _vendorLower) or _vendorLower startswith 'a10networks' or _vendorLower startswith 'zscaler',
+    "Yes (policy-scoped)", "No / unknown")
 | extend NICConfigCount = array_length(nicConfigs)
 | mv-expand nic = nicConfigs
 | extend ANnic = iff(tobool(nic.properties.enableAcceleratedNetworking) == true, 1, 0)
 | summarize ANEnabledNICs = sum(ANnic), NICConfigCount = max(NICConfigCount)
-    by subscriptionId, resourceGroup, VMSSName = name, OrchestrationMode, Vendor, Offer, Sku, OSType, VMSize, Capacity, LegacyVMNVATag, AKSCluster, location
+    by subscriptionId, resourceGroup, VMSSName = name, OrchestrationMode, Vendor, PlanPublisher, PlanProduct,
+       NVAVendor, ImageSource, OSType, OSVersion, VMSize, Capacity, LegacyVMNVATag, AKSCluster, location
 | extend AcceleratedNetworking = case(
     isnull(NICConfigCount) or NICConfigCount == 0, "No NIC config",
     ANEnabledNICs == 0, "Disabled",
     ANEnabledNICs == NICConfigCount, "Enabled",
     strcat("Partial (", tostring(ANEnabledNICs), "/", tostring(NICConfigCount), ")"))
 | extend IsAKS = (isnotempty(AKSCluster) or VMSSName startswith "aks-")
+// Triage verdict -- control-plane signal only; always confirm on-host. AKS is not impacted by MANA.
 | extend Assessment = case(
     IsAKS, "AKS-managed - not impacted by MANA (per docs)",
     isnull(NICConfigCount) or NICConfigCount == 0, "Review - no NIC config",
     ANEnabledNICs == 0, "No action - AN disabled",
     LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
-    "Candidate - verify on host (detect-mana.sh)")
+    NVAVendor startswith "Yes", "NVA (policy-scoped vendor) - validate on host; tag if not MANA-ready",
+    ImageSource in ("Marketplace","Gallery/Custom","Custom/VHD"), "AN non-platform image - verify on host; if it is an NVA not in policy scope, tag manually",
+    "AN general VMSS - verify on host (likely no action)")
 | project
     subscriptionId,
     resourceGroup,
     VMSSName,
     OrchestrationMode,
     Vendor,
-    Offer,
-    Sku,
+    PlanPublisher,
+    PlanProduct,
+    NVAVendor,
+    ImageSource,
     OSType,
+    OSVersion,
     VMSize,
     Capacity,
     NICConfigCount,
@@ -58,4 +95,5 @@ Resources
     LegacyVMNVATag,
     Assessment,
     location
+| order by Assessment asc, Vendor asc, VMSSName asc
 | order by Assessment asc, Vendor asc, VMSSName asc

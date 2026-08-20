@@ -71,7 +71,7 @@ See [docs/governance.md](./docs/governance.md) for the continuous-governance mod
 ```bash
 az extension add -n resource-graph            # one-time
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, NVA:NVAVendor, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
