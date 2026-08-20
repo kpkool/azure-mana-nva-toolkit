@@ -29,8 +29,8 @@ Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances ch
 
 | Date               | Meaning                                                                     |
 | ------------------ | --------------------------------------------------------------------------- |
-| **May 26, 2026**   | Earliest MANA placement — Cobalt 100 & Intel v5 (public cloud)              |
-| **August 6, 2026** | Earliest MANA placement — Intel v1–v4 (public cloud)                        |
+| **May 26, 2026**   | Earliest MANA placement — Intel v5 & Cobalt 100 v6 (public cloud)           |
+| **Timeline under review** | Earliest placement for all other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, Av2, Fsv2, F, G, Ls, …) — **no published date**; act proactively |
 | **May 31, 2027**   | `LegacyVMNVA` tag **no longer honored** — all reliance must end before this |
 
 ## Ownership (RACI, illustrative)

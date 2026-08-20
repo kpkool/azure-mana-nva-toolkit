@@ -58,12 +58,19 @@ Resources
 | extend _policyScoped = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
 | extend _hay = tolower(strcat(Vendor, ' ', PlanProduct, ' ', Offer, ' ', Sku, ' ', name))
 | extend _kwHit = _hay matches regex 'firewall|fortinet|fortigate|palo ?alto|pan-?os|check ?point|cisco|f5|big-?ip|barracuda|sonicwall|sophos|watchguard|zscaler|netskope|versa|velocloud|sd-?wan|ngfw|aviatrix|arista|juniper|netscaler|imperva|radware|riverbed|silver-?peak|els?ity'
-// NVAClass -- 5-state so NO vendor is silently skipped (see inventory-nva-vms.kql for details).
+// First-party / OS publishers = the ONLY publishers allowed to resolve to "General"; anything else is flagged
+// "Third-party publisher (review)" (resilience backstop -- see inventory-nva-vms.kql for the rationale).
+| extend _osPublishers = dynamic([
+    'canonical','redhat','suse','debian','credativ','oracle','openlogic',
+    'almalinux','resf','rockylinux','kali-linux'])
+| extend _isKnownOS = set_has_element(_osPublishers, _pubLower) or _pubLower startswith 'microsoft'
+// NVAClass -- 6-state so NO third-party vendor is silently skipped (see inventory-nva-vms.kql for details).
 | extend NVAClass = case(
     _policyScoped, "Policy-scoped NVA (auto-tag)",
     isnotempty(PlanPublisher), "Marketplace - not in policy list (review)",
     _kwHit, "Possible NVA - keyword hint (review)",
     ImageSource in ("Gallery/Custom","Custom/VHD"), "Custom/unknown image (review)",
+    not(_isKnownOS), "Third-party publisher (review)",
     "General (platform OS)")
 | extend NICConfigCount = array_length(nicConfigs)
 | mv-expand nic = nicConfigs
@@ -87,6 +94,7 @@ Resources
     NVAClass startswith "Marketplace", "Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready",
     NVAClass startswith "Possible", "Possible NVA (keyword hint) - verify on host; tag manually if it is an NVA",
     NVAClass startswith "Custom", "Unknown/custom image - verify on host; tag manually if it is an NVA",
+    NVAClass startswith "Third-party", "Third-party publisher - verify on host; tag manually if it is an NVA",
     "AN general VMSS - verify on host (likely no action)")
 | project
     subscriptionId,
@@ -107,5 +115,4 @@ Resources
     LegacyVMNVATag,
     Assessment,
     location
-| order by Assessment asc, Vendor asc, VMSSName asc
 | order by Assessment asc, Vendor asc, VMSSName asc

@@ -1,13 +1,13 @@
 # Public Microsoft References — MANA / NVA / LegacyVMNVA
 
-All references are public Microsoft Learn or Microsoft Tech Community pages. **Verified:** 2026-08-03.
+All references are public Microsoft Learn or Microsoft Tech Community pages. **Verified:** 2026-08-20.
 
 ## Core MANA / NVA pages
 
 | Reference                                                            | URL                                                                                                                   | Source `ms.date` / last updated         |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| MANA support for Network Virtual Appliances (opt-out, `LegacyVMNVA`) | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out | ms.date 2026-04-07 / updated 2026-07-31 |
-| MANA support for existing VM series (eligible series list)           | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes                    | ms.date 2026-04-07 / updated 2026-07-31 |
+| MANA support for Network Virtual Appliances (opt-out, `LegacyVMNVA`) | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out | ms.date 2026-04-07 / updated 2026-08-06 |
+| MANA support for existing VM series (eligible series list)           | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes                    | ms.date 2026-07-30 / updated 2026-08-11 |
 | Microsoft Azure Network Adapter (MANA) overview                      | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-overview                          | ms.date 2025-09-04 / updated 2026-05-05 |
 
 ## Verify MANA on a VM
@@ -66,8 +66,8 @@ All references are public Microsoft Learn or Microsoft Tech Community pages. **V
 
 | Item                                                    | Value                                            | Primary source        |
 | ------------------------------------------------------- | ------------------------------------------------ | --------------------- |
-| Cobalt 100 & Intel v5 earliest placement (Public cloud) | **May 26, 2026**                                 | NVA opt-out page      |
-| Intel v1–v4 earliest placement (Public cloud)           | **August 6, 2026**                               | NVA opt-out page      |
+| Cobalt 100 v6 & Intel v5 earliest placement (Public cloud) | **May 26, 2026**                                 | NVA opt-out / existing-sizes pages |
+| All other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, …)      | **Timeline under review** (no published date)    | NVA opt-out / existing-sizes pages |
 | Tag honored until                                       | **May 31, 2027**                                 | NVA opt-out page      |
 | Built-in policy definition ID                           | `e87a87f5-e6dd-4919-be21-abb0a4ea4630` (v1.3.0)  | NVA opt-out page      |
 | Tag name                                                | `LegacyVMNVA`                                    | NVA opt-out page      |

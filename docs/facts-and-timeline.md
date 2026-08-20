@@ -1,7 +1,7 @@
 # MANA / NVA — Validated Facts & Timeline
 
 > All statements below are confirmed against official Microsoft Learn pages. See [references.md](./references.md).
-> **Verified:** 2026-08-03. Source pages last updated 2026-07-31. Re-verify dates against the live docs before relying on them.
+> **Verified:** 2026-08-20. Source pages last updated 2026-08-06 (opt-out) / 2026-08-11 (existing-sizes). Re-verify dates against the live docs before relying on them.
 
 ## 1. What MANA is
 
@@ -42,14 +42,14 @@
 
 ## 5. Timeline — earliest placement & tag honoring
 
-| Milestone                                                              | Date                   | Notes                                                                                                                              |
-| ---------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Earliest MANA placement — **Cobalt 100 & Intel v5** VMs (Public cloud) | **May 26, 2026**       | Apply + enable tag before this date                                                                                                |
-| Earliest MANA placement — **Intel v1–v4** VMs (Public cloud)           | **August 6, 2026**     | Apply + enable tag before this date                                                                                                |
-| **`LegacyVMNVA` tag honored until**                                    | **May 31, 2027**       | If tag applied+enabled before this date, VM avoids MANA placement until this date                                                  |
-| Tag no longer honored                                                  | **After May 31, 2027** | All MANA-eligible series may be placed on MANA hardware; no action required after this date (recommend removing policy assignment) |
+| Milestone                                                                    | Date                   | Notes                                                                                                                              |
+| ---------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Earliest MANA placement — **Intel v5** (Dv5/Dsv5/Ddv5/Ddsv5/Dlsv5/Dldsv5/Ev5/Esv5/Edv5/Edsv5) & **Cobalt 100 v6** (Dpsv6/Dpdsv6/Dplsv6/Dpldsv6/Epsv6/Epdsv6), Public cloud | **May 26, 2026**       | Apply + enable tag before this date                                                                                                |
+| Earliest MANA placement — **all other eligible series** (Dsv2, Dv2, Dsv3, Dv3, Dsv4, Dv4, Esv3/4, Bsv2, Av2, Fsv2, Fs, F, G, GS, Ls, …) | **Timeline under review** | **No confirmed date yet** — Microsoft has not published one. Apply + enable the tag proactively; re-check the live page.        |
+| **`LegacyVMNVA` tag honored until**                                          | **May 31, 2027**       | If tag applied+enabled before this date, VM avoids MANA placement until this date                                                  |
+| Tag no longer honored                                                        | **After May 31, 2027** | All MANA-eligible series may be placed on MANA hardware; no action required after this date (recommend removing policy assignment) |
 
-> Note: the Intel v1–v4 public-cloud date is **August 6, 2026**. Confirmed on the NVA opt-out page.
+> **Important:** the live docs (opt-out + existing-sizes, updated Aug 2026) list **only** May 26, 2026 (Intel v5 + Cobalt 100 v6) as a confirmed date; **every other series — including Dsv2/Dv2/Dsv3/etc. — is "Timeline under review" with no published date.** An earlier "August 6, 2026 (Intel v1–v4)" date has been **removed** from the docs. Because a placement date can appear at any time, apply the tag proactively rather than waiting for a date.
 
 ## 6. Network performance if OS doesn't support MANA (fallback)
 

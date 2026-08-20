@@ -30,7 +30,7 @@ flowchart LR
   G -.->|"new VMs or drift"| A
 ```
 
-The classifier is **conservative**: general/AN-off/AKS → no action; everything else (NVA, unlisted vendor, unknown/custom image) → **review on host** so no vendor is silently skipped. Governance model: [docs/governance.md](./docs/governance.md).
+The classifier is **conservative by design — no third-party vendor is silently skipped**: only a recognized first-party OS image (Microsoft / Canonical / RedHat / SUSE / Debian / Oracle …) with AN off, or AKS, resolves to *no action*. **Every** other publisher — policy-listed NVA, unlisted Marketplace vendor, keyword hint, custom/unknown image, or any non-OS third-party publisher — is flagged for **review on host**. Governance model: [docs/governance.md](./docs/governance.md).
 
 ### Governance process (in depth)
 
@@ -68,7 +68,7 @@ az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
   -o table
 ```
 
-One row **per VM** (multi-NIC safe) with the identity to drive Step 2 (**Sub + RG + VM**), **Vendor** (Marketplace plan-publisher aware), **NVAClass** (policy-scoped / marketplace-unlisted / keyword-hint / custom-unknown / general), **ImageSource**, **OS + OSVersion** (drives `.sh` vs `.ps1`), NIC-accurate **AN**, the **tag**, and a **verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) (scale sets, AKS-aware) and [scripts/discover-vendors.kql](./scripts/discover-vendors.kql) to **enumerate every vendor / plan / OS so no vendor is skipped**. Details: [docs/inventory-arg.md](./docs/inventory-arg.md).
+One row **per VM** (multi-NIC safe) with the identity to drive Step 2 (**Sub + RG + VM**), **Vendor** (Marketplace plan-publisher aware), **NVAClass** (policy-scoped / marketplace-unlisted / keyword-hint / custom-unknown / **third-party-publisher** / general), **ImageSource**, **OS + OSVersion** (drives `.sh` vs `.ps1`), NIC-accurate **AN**, the **tag**, and a **verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) (scale sets, AKS-aware) and [scripts/discover-vendors.kql](./scripts/discover-vendors.kql) to **enumerate every vendor / plan / OS so no vendor is skipped**. Details: [docs/inventory-arg.md](./docs/inventory-arg.md).
 
 > The KQL selects more columns than any one `--query` shows (`PlanPublisher`, `PlanProduct`, `Offer`, `Sku`, `location`). The `--query` is a **client-side filter** — Resource Graph Explorer shows all fields.
 > ARG shows candidates only — it **cannot** confirm MANA hardware, nor that a tag was enabled via reapply. Do that in Step 2.
