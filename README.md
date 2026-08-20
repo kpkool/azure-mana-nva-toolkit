@@ -32,6 +32,26 @@ flowchart LR
 
 The classifier is **conservative**: general/AN-off/AKS → no action; everything else (NVA, unlisted vendor, unknown/custom image) → **review on host** so no vendor is silently skipped. Governance model: [docs/governance.md](./docs/governance.md).
 
+### Governance process (in depth)
+
+For customers and reviewers who want the full decision path — discover, verify, allow-or-safeguard, migrate, then govern at scale in a continuous loop:
+
+```mermaid
+flowchart TD
+  A["1 Discover and assess (ARG): vendor, OS, AN, NVA class, tag, verdict"] --> B{"AN on and NVA or unknown, not AKS?"}
+  B -->|"No: general, AN off, or AKS"| Z["No action"]
+  B -->|"Yes or review"| C["2 Verify on host: driver mana vs mlx5, Linux or Windows, traffic"]
+  C --> D{"MANA compatible?"}
+  D -->|"Yes"| E["Allow MANA and capture evidence"]
+  D -->|"No"| F["3 Apply LegacyVMNVA (policy or manual), then reapply"]
+  F --> G["Migrate to MANA-ready config, then remove tag"]
+  E --> H["4 Govern: policy at scale, drift scan, timeline gates"]
+  G --> H
+  H -.->|"new VMs or drift"| A
+```
+
+Full continuous-governance model (scale enforcement, drift, vendor register, RACI, timeline gates): [docs/governance.md](./docs/governance.md).
+
 ## Prerequisites
 
 - **Azure CLI** signed in: `az login`; then `az account set --subscription <subscription-id>`.
