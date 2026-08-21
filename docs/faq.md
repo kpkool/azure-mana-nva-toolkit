@@ -31,6 +31,8 @@ No. A VM stays on its current hardware until an action re-runs allocation — a 
 - **Process:** (1) confirm AN status per NIC (ARG inventory / portal), (2) if disabled → **no action**, (3) optionally still modernize the OS/VM series for the best networking experience, but it is **not required** for MANA.
 - You do **not** need the `LegacyVMNVA` tag on AN-disabled VMs. The tag is only for **AN-based NVAs** that observe degradation on MANA hardware.
 
+> **Forward-looking (opt-in):** "No action required" means no _risk_ action — it does **not** mean ignore these VMs forever. AN-off / general workloads are the natural **candidates to adopt MANA later** for its throughput, reliability, and resiliency gains: enable Accelerated Networking on a MANA-ready OS and (ideally) a newer/MANA-optimized series. Keep them in your periodic re-scan as an **optimization** decision, separate from the NVA-risk decision. (AKS is handled automatically by Azure — no action either way.)
+
 ## When the `LegacyVMNVA` tag is no longer honored, what happens to AN-disabled devices?
 
 **Nothing changes for them.** The tag is honored until **May 31, 2027**; after that, all MANA-eligible series may be placed on MANA-capable hardware. AN-disabled workloads were never at risk (no AN = no VF/driver dependency), so they **continue to run as expected** before and after that date. Only **AN-enabled NVAs on unsupported OS/kernel** face placement risk after the tag stops being honored.

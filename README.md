@@ -20,17 +20,22 @@ As Azure expands MANA (a component of Azure Boost) to existing VM series, VMs in
 ```mermaid
 flowchart LR
   A["1 Inventory (ARG): vendor, OS, AN, NVA class, tag"] --> B{"AN on and NVA or unknown?"}
-  B -->|"No: general, AN off, or AKS"| Z["No action"]
+  B -->|"No: general or AN off"| Z["No risk action now (MANA-safe today)"]
+  B -->|"AKS"| K["AKS: Azure adopts MANA automatically"]
   B -->|"Yes or review"| C["2 Verify on host: driver mana vs mlx5, traffic"]
   C --> D{"MANA compatible?"}
   D -->|"Yes"| E["Allow MANA"]
   D -->|"No"| F["3 Apply LegacyVMNVA, reapply, then migrate"]
   E --> G["4 Govern and re-scan"]
   F --> G
+  Z -.->|"revisit to opt in for MANA performance"| G
+  K -.-> G
   G -.->|"new VMs or drift"| A
 ```
 
-The classifier is **conservative by design — no third-party vendor is silently skipped**: only a recognized first-party OS image (Microsoft / Canonical / RedHat / SUSE / Debian / Oracle …) with AN off, or AKS, resolves to *no action*. **Every** other publisher — policy-listed NVA, unlisted Marketplace vendor, keyword hint, custom/unknown image, or any non-OS third-party publisher — is flagged for **review on host**. Governance model: [docs/governance.md](./docs/governance.md).
+The classifier is **conservative by design — no third-party vendor is silently skipped**: only a recognized first-party OS image (Microsoft / Canonical / RedHat / SUSE / Debian / Oracle …) with AN off, or AKS, resolves to _no action_. **Every** other publisher — policy-listed NVA, unlisted Marketplace vendor, keyword hint, custom/unknown image, or any non-OS third-party publisher — is flagged for **review on host**. Governance model: [docs/governance.md](./docs/governance.md).
+
+> **"No action" ≠ "ignore forever."** It means no _risk_ action today — those workloads run fine if placed on MANA hardware. But they stay in the **govern/re-scan loop** as **MANA-optimization candidates**: general / AN-off VMs can later *opt in* (enable Accelerated Networking + a MANA-ready OS/series) to gain MANA's throughput, reliability, and resiliency. **AKS is the one exception** — Azure adopts MANA for AKS node pools automatically, so it needs no customer action. Two tracks share the loop: the **risk track** (NVAs that could degrade → safeguard + migrate) and the **optimization track** (general/AN-off → periodically reassess for MANA opt-in).
 
 ### Governance process (in depth)
 
@@ -39,14 +44,17 @@ For customers and reviewers who want the full decision path — discover, verify
 ```mermaid
 flowchart TD
   A["1 Discover and assess (ARG): vendor, OS, AN, NVA class, tag, verdict"] --> B{"AN on and NVA or unknown, not AKS?"}
-  B -->|"No: general, AN off, or AKS"| Z["No action"]
+  B -->|"No: general or AN off"| Z["No risk action now (MANA-safe today)"]
+  B -->|"AKS"| K["AKS: Azure adopts MANA automatically - no customer action"]
   B -->|"Yes or review"| C["2 Verify on host: driver mana vs mlx5, Linux or Windows, traffic"]
   C --> D{"MANA compatible?"}
   D -->|"Yes"| E["Allow MANA and capture evidence"]
   D -->|"No"| F["3 Apply LegacyVMNVA (policy or manual), then reapply"]
   F --> G["Migrate to MANA-ready config, then remove tag"]
-  E --> H["4 Govern: policy at scale, drift scan, timeline gates"]
+  E --> H["4 Govern: policy at scale, drift scan, timeline gates, MANA opt-in review"]
   G --> H
+  Z -.->|"revisit to opt in for MANA performance"| H
+  K -.-> H
   H -.->|"new VMs or drift"| A
 ```
 

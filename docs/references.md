@@ -64,15 +64,15 @@ All references are public Microsoft Learn or Microsoft Tech Community pages. **V
 
 ## Verified key values (quick audit)
 
-| Item                                                    | Value                                            | Primary source        |
-| ------------------------------------------------------- | ------------------------------------------------ | --------------------- |
+| Item                                                       | Value                                            | Primary source                     |
+| ---------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
 | Cobalt 100 v6 & Intel v5 earliest placement (Public cloud) | **May 26, 2026**                                 | NVA opt-out / existing-sizes pages |
-| All other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, …)      | **Timeline under review** (no published date)    | NVA opt-out / existing-sizes pages |
-| Tag honored until                                       | **May 31, 2027**                                 | NVA opt-out page      |
-| Built-in policy definition ID                           | `e87a87f5-e6dd-4919-be21-abb0a4ea4630` (v1.3.0)  | NVA opt-out page      |
-| Tag name                                                | `LegacyVMNVA`                                    | NVA opt-out page      |
-| VMSS Uniform reapply API version                        | `2025-11-01`                                     | NVA opt-out page      |
-| Linux MANA PCI device                                   | `Microsoft Corporation Device 00ba` (`lspci`)    | Linux MANA page       |
-| Linux MANA VF driver                                    | `mana` (`ethtool -i <vf>`)                       | Linux MANA page       |
-| Windows MANA PCI ID                                     | `PCI\VEN_1414&DEV_00BA&`                         | Windows MANA page     |
-| Linux MANA kernel (first upstream)                      | 5.15+ (6.2 for IB/RDMA & DPDK; DPDK needs 6.14+) | Linux MANA / overview |
+| All other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, …)     | **Timeline under review** (no published date)    | NVA opt-out / existing-sizes pages |
+| Tag honored until                                          | **May 31, 2027**                                 | NVA opt-out page                   |
+| Built-in policy definition ID                              | `e87a87f5-e6dd-4919-be21-abb0a4ea4630` (v1.3.0)  | NVA opt-out page                   |
+| Tag name                                                   | `LegacyVMNVA`                                    | NVA opt-out page                   |
+| VMSS Uniform reapply API version                           | `2025-11-01`                                     | NVA opt-out page                   |
+| Linux MANA PCI device                                      | `Microsoft Corporation Device 00ba` (`lspci`)    | Linux MANA page                    |
+| Linux MANA VF driver                                       | `mana` (`ethtool -i <vf>`)                       | Linux MANA page                    |
+| Windows MANA PCI ID                                        | `PCI\VEN_1414&DEV_00BA&`                         | Windows MANA page                  |
+| Linux MANA kernel (first upstream)                         | 5.15+ (6.2 for IB/RDMA & DPDK; DPDK needs 6.14+) | Linux MANA / overview              |
