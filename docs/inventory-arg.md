@@ -15,11 +15,13 @@ Use [`../scripts/inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql). Runs
 ```bash
 az extension add -n resource-graph            # one-time (CLI only)
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, NVA:NVAClass, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **AN** (per-NIC accurate), **LegacyVMNVATag** (`True`/`Not set`), and **Assessment** (a triage verdict). The KQL always selects `subscriptionId` and `resourceGroup`; just keep them in the `--query` projection so every row is directly runnable.
+Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **Vendor** (Marketplace plan publisher first, else image publisher), **NVAClass** (6-state — see below), **ImageSource** (`Marketplace` / `Gallery/Custom` / `Platform` / `Custom/VHD`), **OS + OSVersion**, **AN** (per-NIC accurate), **LegacyVMNVATag**, and **Assessment**. The full column list (incl. `PlanPublisher`, `PlanProduct`, `Offer`, `Sku`) is documented in the KQL header — widen the `--query` projection to show more.
+
+> **Enumerate every vendor (safety net):** [`../scripts/discover-vendors.kql`](../scripts/discover-vendors.kql) lists **all** distinct Vendor / PlanPublisher / PlanProduct / OS / ImageSource across VMs + VMSS with counts, a `PolicyScoped` flag, and a **`FirstPartyOS`** flag — so no vendor is silently skipped. Review every row where **`FirstPartyOS=No`** (all third parties) or `PolicyScoped=No`.
 
 ## Why this differs from the common one-liner (multiple-NIC fix)
 
@@ -47,22 +49,24 @@ This toolkit's query **summarizes NICs per VM first**, then joins — so each VM
 
 ## Interpreting results
 
-- **Vendor** = image publisher. Marketplace NVAs show the vendor (e.g., `paloaltonetworks`, `checkpoint`, `fortinet`).
-- **Empty Vendor** = custom image, shared image gallery, or disk-based VM — common for NVAs **not** from Marketplace. These won't be auto-tagged by the built-in `LegacyVMNVA` policy; handle via the vendor/your tooling (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)).
+- **Vendor** = the **Marketplace plan publisher** if present (this is what the built-in `LegacyVMNVA` policy matches), else the image publisher; `unknown/custom` for gallery/VHD images.
+- **NVAClass** — 6-state so nothing is silently skipped: **`Policy-scoped NVA (auto-tag)`** (vendor in the policy allow-list → policy can auto-tag, e.g. `paloaltonetworks`), **`Marketplace - not in policy list (review)`** (a Marketplace NVA the policy will NOT tag — tag manually), **`Possible NVA - keyword hint (review)`** (name/product matches an NVA keyword), **`Custom/unknown image (review)`** (gallery/VHD — unidentifiable from metadata; check on host/CMDB), **`Third-party publisher (review)`** (a platform image from a publisher that is **not** a recognized first-party OS vendor — the resilience backstop that catches niche appliances), **`General (platform OS)`** (a normal first-party OS image — typically no action).
+- **ImageSource** → `Marketplace` (policy can auto-tag in-scope publishers), or `Gallery/Custom` / `Platform` / `Custom/VHD` (the policy will **not** auto-tag — tag manually if it's an NVA).
 - **AN = Disabled** → no MANA action needed for that VM.
-- **AN = Enabled / Partial** on a MANA-eligible size → **candidate**; confirm on the box with `scripts/detect-mana.sh`.
+- **AN = Enabled / Partial** on a MANA-eligible size → verify on the host with `scripts/detect-mana.sh` / `validate-nva-mana.*`.
 - **LegacyVMNVATag = True** → opt-out tag present; confirm it was **enabled via reapply**, then plan migration.
-- **Assessment** = triage verdict (control-plane only): `No action - AN disabled`, `Candidate - verify on host`, `Opt-out tag present - confirm reapply`, or `AKS-managed - not impacted`.
+- **Assessment** = triage verdict (control-plane only): `No action - AN disabled`, `NVA (policy-scoped) - validate on host`, `Marketplace NVA NOT in policy list - tag MANUALLY if not MANA-ready`, `Third-party publisher - verify on host; tag manually if it is an NVA`, `Unknown/custom image - tag manually if it is an NVA`, `AN general VM - likely no action`, `Opt-out tag present - confirm reapply`, or `AKS-managed - not impacted`.
 
 ## Sample output (anonymized)
 
 ```
-RG                VM         Size              AN        Tag      Verdict
-----------------  ---------  ----------------  --------  -------  ---------------------------------------------------------
-rg-net-01         web-01     Standard_B4ms     Disabled  Not set  No action - AN disabled
-rg-net-01         nva-fw-01  Standard_D4s_v5   Enabled   Not set  Candidate - verify on host (detect-mana.sh)
-rg-net-01         nva-fw-02  Standard_D4s_v5   Partial   Not set  Candidate - verify on host (detect-mana.sh)
-rg-net-01         nva-fw-03  Standard_D4s_v5   Enabled   True     Opt-out tag present - confirm reapply, then plan migration
+RG        VM         Vendor            NVAClass                          ImageSource     OS      OSVersion                   AN        Tag      Verdict
+--------  ---------  ----------------  --------------------------------  --------------  ------  --------------------------  --------  -------  ------------------------------------------------------------
+rg-app    web-01     canonical         General (platform OS)             Platform        Linux   ubuntu-24_04-lts / server   Disabled  Not set  No action - AN disabled
+rg-net    nva-fw-01  paloaltonetworks  Policy-scoped NVA (auto-tag)      Marketplace     Linux   vmseries-flex / byol        Enabled   Not set  NVA (policy-scoped) - validate on host; policy auto-tags in scope
+rg-net    nva-el-01  elisityinc123     Marketplace - not in policy list  Marketplace     Linux   elisity-edge / edge         Enabled   Not set  Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready
+rg-net    nva-ac-01  acme-appliances   Third-party publisher (review)    Platform        Linux   acme-secure-gw / 2024       Enabled   Not set  Third-party publisher - verify on host; tag manually if it is an NVA
+rg-app    app-01     canonical         General (platform OS)             Platform        Linux   ubuntu-24_04-lts / server   Enabled   Not set  AN general VM - verify on host (likely no action)
 ```
 
 > The `Sub` (subscriptionId) column is omitted above only for page width — include `Sub:subscriptionId` in real runs (it is already selected by the KQL). With Sub + RG + VM on each row you can run Step 2 directly: `az account set --subscription <Sub>` then `az vm run-command -g <RG> -n <VM> ...`.
@@ -73,7 +77,7 @@ NVAs are often deployed as **VMSS**. Run [`../scripts/inventory-nva-vmss.kql`](.
 
 ```bash
 az graph query -q "@scripts/inventory-nva-vmss.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, Size:VMSize, OS:OSType, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VMSS:VMSSName, Mode:OrchestrationMode, Vendor:Vendor, NVA:NVAClass, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" -o table
 ```
 
 - Covers **VMSS Uniform**; VMSS **Flex** instances already appear in the VM query.

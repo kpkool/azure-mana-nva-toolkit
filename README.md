@@ -4,60 +4,61 @@
 
 As Azure expands MANA (a component of Azure Boost) to existing VM series, VMs in eligible series may be placed on MANA-capable hardware. **Most workloads transition without issue**, but **NVAs need validation** because they depend directly on the underlying network hardware and drivers. This toolkit helps you check what your VMs are running on, apply the temporary `LegacyVMNVA` exception if needed, and plan migration.
 
-> ⚠️ **Accuracy & sources:** Every fact, date, tag, policy ID, and command is grounded in official Microsoft Learn pages listed in [docs/references.md](./docs/references.md). Verified 2026-08-03; re-verify dates against the live docs before relying on them.
+> **Accuracy & sources:** every fact, date, tag, policy ID, and command is grounded in official Microsoft Learn (see [docs/references.md](./docs/references.md)). Re-verify dates against the live docs before relying on them.
 
-## What is MANA, and why it matters
+## TL;DR
 
-The **Microsoft Azure Network Adapter (MANA)** is Azure's next-generation network interface and a component of **Azure Boost**. It provides stable, **forward-compatible** drivers for Windows and Linux, engineered by Microsoft to take advantage of the latest cloud-networking hardware. Azure is expanding MANA from newer VM series to **existing** series, so eligible VMs may be placed on MANA-capable hardware over time.
+- Azure is expanding **MANA** (part of Azure Boost) to **existing** VM series. Eligible VMs may land on MANA-capable hardware after a **stop-deallocate-start** or a **maintenance event**.
+- **General workloads transition transparently — no action.** **NVAs** (firewalls / routers / SD-WAN) using **Accelerated Networking** need validation because they depend directly on the NIC driver.
+- If an NVA isn't confirmed MANA-compatible, apply the temporary **`LegacyVMNVA`** tag (honored to **May 31, 2027**) to defer MANA placement, then migrate to a MANA-ready config.
+- This toolkit runs the loop end-to-end: **inventory → verify on host → safeguard (if needed) → migrate**, with reproducible evidence.
 
-**Benefits / value add:**
+**Official refs:** [MANA overview](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-overview) · [existing VM series](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes) · [NVA opt-out (`LegacyVMNVA`)](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out).
 
-- **Performance & scalability** — higher throughput and better handling of large connection counts on modern hardware.
-- **Reliability & resiliency** — improvements delivered at the platform layer.
-- **Forward-compatible drivers** — a stable driver model reduces future churn; feature parity with prior Azure networking is maintained (Mellanox `mlx4`/`mlx5` still supported).
-- **No action for most workloads** — standard VMs transition transparently.
-
-**Business impact for NVAs:** Network Virtual Appliances (firewalls, routers, SD-WAN) depend directly on the NIC hardware/driver, so a placement change can affect throughput or connectivity if the appliance isn't MANA-compatible. This toolkit lets you **inventory, validate, and de-risk** that transition — and use the Microsoft-provided **`LegacyVMNVA`** temporary exception to defer MANA placement (until **May 31, 2027**) while you confirm vendor compatibility and migrate. The result: **no surprise outages, a defensible audit trail, and a planned migration** instead of a reactive one.
-
-**Official references:** [MANA overview](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-overview) · [MANA for existing VM series](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes) · [MANA support for NVAs (`LegacyVMNVA`)](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out) · full list in [docs/references.md](./docs/references.md).
-
-## Workflow
-
-1. **Inventory** candidates at scale (Azure Resource Graph) → find VMs with Accelerated Networking on eligible sizes.
-2. **Verify** each candidate in-guest → is it actually on MANA? (`mana` vs `mlx5_core`).
-3. **Safeguard (if needed)** — for any NVA **not confirmed MANA-compatible**, apply the `LegacyVMNVA` opt-out **proactively** (don't wait for a performance hit).
-4. **Migrate** to a MANA-compatible config, then remove the exception.
-
-### High-level process
+## How it works
 
 ```mermaid
 flowchart LR
-  A["Discover (ARG)"] --> B["Verify on host"]
-  B --> C{"MANA compatible?"}
-  C -->|"Yes"| D["Allow MANA"]
-  C -->|"No"| E["Apply LegacyVMNVA, then migrate"]
-  D --> F["Govern continuously"]
-  E --> F
-  F -->|"new VMs, drift"| A
+  A["1 Inventory (ARG): vendor, OS, AN, NVA class, tag"] --> B{"AN on and NVA or unknown?"}
+  B -->|"No: general or AN off"| Z["No risk action now (MANA-safe today)"]
+  B -->|"AKS"| K["AKS: Azure adopts MANA automatically"]
+  B -->|"Yes or review"| C["2 Verify on host: driver mana vs mlx5, traffic"]
+  C --> D{"MANA compatible?"}
+  D -->|"Yes"| E["Allow MANA"]
+  D -->|"No"| F["3 Apply LegacyVMNVA, reapply, then migrate"]
+  E --> G["4 Govern and re-scan"]
+  F --> G
+  Z -.->|"revisit to opt in for MANA performance"| G
+  K -.-> G
+  G -.->|"new VMs or drift"| A
 ```
 
-### In-depth technical process
+The classifier is **conservative by design — no third-party vendor is silently skipped**: only a recognized first-party OS image (Microsoft / Canonical / RedHat / SUSE / Debian / Oracle …) with AN off, or AKS, resolves to _no action_. **Every** other publisher — policy-listed NVA, unlisted Marketplace vendor, keyword hint, custom/unknown image, or any non-OS third-party publisher — is flagged for **review on host**. Governance model: [docs/governance.md](./docs/governance.md).
+
+> **"No action" ≠ "ignore forever."** It means no _risk_ action today — those workloads run fine if placed on MANA hardware. But they stay in the **govern/re-scan loop** as **MANA-optimization candidates**: general / AN-off VMs can later *opt in* (enable Accelerated Networking + a MANA-ready OS/series) to gain MANA's throughput, reliability, and resiliency. **AKS is the one exception** — Azure adopts MANA for AKS node pools automatically, so it needs no customer action. Two tracks share the loop: the **risk track** (NVAs that could degrade → safeguard + migrate) and the **optimization track** (general/AN-off → periodically reassess for MANA opt-in).
+
+### Governance process (in depth)
+
+For customers and reviewers who want the full decision path — discover, verify, allow-or-safeguard, migrate, then govern at scale in a continuous loop:
 
 ```mermaid
 flowchart TD
-  A["1 Discover and assess (ARG): size, AN, tag, verdict"] --> B{"AN and eligible size, not AKS?"}
-  B -->|"No"| Z["No action"]
-  B -->|"Yes"| C["2 Verify on host: mana vs mlx5 (Linux, Windows, vendor)"]
+  A["1 Discover and assess (ARG): vendor, OS, AN, NVA class, tag, verdict"] --> B{"AN on and NVA or unknown, not AKS?"}
+  B -->|"No: general or AN off"| Z["No risk action now (MANA-safe today)"]
+  B -->|"AKS"| K["AKS: Azure adopts MANA automatically - no customer action"]
+  B -->|"Yes or review"| C["2 Verify on host: driver mana vs mlx5, Linux or Windows, traffic"]
   C --> D{"MANA compatible?"}
   D -->|"Yes"| E["Allow MANA and capture evidence"]
-  D -->|"No"| F["3 Apply LegacyVMNVA (policy or manual, then reapply)"]
-  F --> G["Migrate to MANA-ready config, remove tag"]
-  E --> H["4 Govern: policy at scale, drift scan, timeline gates"]
+  D -->|"No"| F["3 Apply LegacyVMNVA (policy or manual), then reapply"]
+  F --> G["Migrate to MANA-ready config, then remove tag"]
+  E --> H["4 Govern: policy at scale, drift scan, timeline gates, MANA opt-in review"]
   G --> H
-  H -->|"loop"| A
+  Z -.->|"revisit to opt in for MANA performance"| H
+  K -.-> H
+  H -.->|"new VMs or drift"| A
 ```
 
-See [docs/governance.md](./docs/governance.md) for the continuous-governance model.
+Full continuous-governance model (scale enforcement, drift, vendor register, RACI, timeline gates): [docs/governance.md](./docs/governance.md).
 
 ## Prerequisites
 
@@ -71,13 +72,13 @@ See [docs/governance.md](./docs/governance.md) for the continuous-governance mod
 ```bash
 az extension add -n resource-graph            # one-time
 az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
-  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, Size:VMSize, OS:OSType, NICs:NICCount, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
+  --query "data[].{Sub:subscriptionId, RG:resourceGroup, VM:VMName, Vendor:Vendor, NVA:NVAClass, ImageSource:ImageSource, OS:OSType, OSVersion:OSVersion, Size:VMSize, AN:AcceleratedNetworking, Tag:LegacyVMNVATag, Verdict:Assessment}" \
   -o table
 ```
 
-Returns one row **per VM** (multi-NIC safe) with **Subscription + resource group + VM name** (the identity you feed straight into Step 2), **Vendor** (image publisher), size, **OS** (`Linux`/`Windows` — tells you whether to run the `.sh` or `.ps1` in Step 2), NIC-accurate AN, the **`LegacyVMNVA` tag**, and a **triage verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) for **scale sets** (AKS-aware). Details + the multiple-NIC fix: [docs/inventory-arg.md](./docs/inventory-arg.md). Both queries also run in **Azure Resource Graph Explorer** in the portal.
+One row **per VM** (multi-NIC safe) with the identity to drive Step 2 (**Sub + RG + VM**), **Vendor** (Marketplace plan-publisher aware), **NVAClass** (policy-scoped / marketplace-unlisted / keyword-hint / custom-unknown / **third-party-publisher** / general), **ImageSource**, **OS + OSVersion** (drives `.sh` vs `.ps1`), NIC-accurate **AN**, the **tag**, and a **verdict**. Also run [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) (scale sets, AKS-aware) and [scripts/discover-vendors.kql](./scripts/discover-vendors.kql) to **enumerate every vendor / plan / OS so no vendor is skipped**. Details: [docs/inventory-arg.md](./docs/inventory-arg.md).
 
-> The KQL selects more columns than any one `--query` shows (Offer, Sku for OS version, location, etc.). The `--query` projection above is a **client-side filter** — in Resource Graph Explorer you'll see all fields; add/remove fields in `--query` to widen or narrow the CLI table.
+> The KQL selects more columns than any one `--query` shows (`PlanPublisher`, `PlanProduct`, `Offer`, `Sku`, `location`). The `--query` is a **client-side filter** — Resource Graph Explorer shows all fields.
 > ARG shows candidates only — it **cannot** confirm MANA hardware, nor that a tag was enabled via reapply. Do that in Step 2.
 
 ## Step 2 — Is a given VM on MANA? (driver + traffic — the durable check)
@@ -135,6 +136,7 @@ The **authoritative** "which VF carries traffic" signal is the netvsc log line `
 | Path                                                                       | Purpose                                                                       |
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | [docs/facts-and-timeline.md](./docs/facts-and-timeline.md)                 | What MANA is, eligible VM series, placement dates, `LegacyVMNVA`, ODCR        |
+| [docs/faq.md](./docs/faq.md)                                               | FAQ: AN-disabled action, tag mechanism/dates, non-Marketplace NVAs, ODCR, v6+ |
 | [docs/inventory-arg.md](./docs/inventory-arg.md)                           | Inventory NVA candidates at scale with Azure Resource Graph (multi-NIC safe)  |
 | [docs/verify-mana-nic.md](./docs/verify-mana-nic.md)                       | Verify MANA (Portal, Linux, Windows) — the definitive checks                  |
 | [docs/implementation-legacyvmnva.md](./docs/implementation-legacyvmnva.md) | Apply the opt-out (policy → remediate → reapply → verify → roll back), az CLI |
@@ -143,18 +145,13 @@ The **authoritative** "which VF carries traffic" signal is the netvsc log line `
 | [docs/sample-outputs.md](./docs/sample-outputs.md)                         | Real (anonymized) script/query outputs: Linux, Windows, traffic, ARG          |
 | [docs/references.md](./docs/references.md)                                 | Public Microsoft references + verified key values                             |
 
-**Scripts** (`scripts/`) — run in-guest or remotely via `az vm run-command` (no SSH/RDP):
+**Scripts** (`scripts/`) — run in-guest via `az vm run-command` (no SSH/RDP), or the `.kql` in Resource Graph Explorer:
 
-- **Inventory:** [`inventory-nva-vms.kql`](./scripts/inventory-nva-vms.kql), [`inventory-nva-vmss.kql`](./scripts/inventory-nva-vmss.kql) — candidates at scale (Sub + RG + VM per row).
+- **Inventory:** [`inventory-nva-vms.kql`](./scripts/inventory-nva-vms.kql), [`inventory-nva-vmss.kql`](./scripts/inventory-nva-vmss.kql) — classify candidates at scale (Sub+RG+VM, NVAClass, ImageSource, OS).
+- **Discovery:** [`discover-vendors.kql`](./scripts/discover-vendors.kql) — enumerate **every** vendor / plan / OS so no vendor is missed.
 - **Quick detect:** [`detect-mana.sh`](./scripts/detect-mana.sh), [`detect-mana.ps1`](./scripts/detect-mana.ps1) — driver + `lspci` + VF counters.
 - **Full validator:** [`validate-nva-mana.sh`](./scripts/validate-nva-mana.sh), [`validate-nva-mana.ps1`](./scripts/validate-nva-mana.ps1) — tag + hardware + driver + netvsc datapath + functioning + verdict.
-- **Traffic attribution:** [`distinguish-vf-mana.sh`](./scripts/distinguish-vf-mana.sh) — proves MANA vs Mellanox under load (dmesg / IRQ / per-VF bytes).
-- **Traffic capture:** [`traffic-capture.sh`](./scripts/traffic-capture.sh) — VF counters before/after a flood ping.
-  | [scripts/inventory-nva-vms.kql](./scripts/inventory-nva-vms.kql) | Azure Resource Graph query — per-VM NIC + Accelerated Networking inventory |
-  | [scripts/inventory-nva-vmss.kql](./scripts/inventory-nva-vmss.kql) | Azure Resource Graph query — VMSS inventory (AKS-aware, AN + tag + verdict) |
-  | [scripts/detect-mana.sh](./scripts/detect-mana.sh) | Detect MANA vs ConnectX on **Linux** (kernel, `lspci`, VF driver, counters) |
-  | [scripts/detect-mana.ps1](./scripts/detect-mana.ps1) | Detect MANA on **Windows** (`Get-NetAdapter`, `Get-PnpDevice`, stats) |
-  | [scripts/traffic-capture.sh](./scripts/traffic-capture.sh) | VF counter before/after a VM-to-VM flood ping |
+- **Traffic:** [`distinguish-vf-mana.sh`](./scripts/distinguish-vf-mana.sh) (MANA vs Mellanox under load) · [`traffic-capture.sh`](./scripts/traffic-capture.sh) (VF counters before/after).
 
 ## Recommended actions (summary)
 
@@ -165,7 +162,7 @@ The **authoritative** "which VF carries traffic" signal is the netvsc log line `
 5. Roll out gradually with safe-deployment practices; validate app + network behavior.
 6. Migrate to a MANA-compatible configuration and remove the exception when compatibility is confirmed.
 
-**Key dates:** earliest MANA placement — **May 26, 2026** (Cobalt 100 & Intel v5, public cloud) and **August 6, 2026** (Intel v1–v4, public cloud). The `LegacyVMNVA` tag is honored **until May 31, 2027**. See [docs/facts-and-timeline.md](./docs/facts-and-timeline.md).
+**Key dates:** earliest MANA placement (public cloud) — **May 26, 2026** for Intel v5 + Cobalt 100 v6. Other eligible series (incl. **Dsv2/Dv2/Bsv2/Av2, Dsv3/Dsv4, Fsv2, Ls**) are currently **"Timeline under review"** — no confirmed date. The `LegacyVMNVA` tag is honored **until May 31, 2027**. See [docs/facts-and-timeline.md](./docs/facts-and-timeline.md).
 
 ## Important notes
 

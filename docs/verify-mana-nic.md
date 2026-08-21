@@ -1,7 +1,7 @@
 # How to Verify Whether a VM Is on MANA-Capable Hardware
 
 > Commands and outputs below are taken from the official Microsoft Learn pages. See [references.md](./references.md).
-> **Verified:** 2026-08-03.
+> **Verified:** 2026-08-20.
 
 MANA requires **both** host hardware support **and** VM software (driver) support. Run all applicable checks: **Portal (AN enabled) → Hardware (PCI device) → Driver → Traffic**.
 
