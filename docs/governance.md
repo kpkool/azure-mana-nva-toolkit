@@ -23,16 +23,16 @@ Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances ch
 
 ## What to put in place
 
-| Control                  | Purpose                                                                       | How                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Scale enforcement**    | New NVAs are safe by default                                                  | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`) |
-| **Continuous discovery** | Catch new/changed VMs & VMSS                                                  | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard                                                |
-| **Drift alerting**       | Flag an untagged AN NVA on an eligible size                                   | ARG-backed alert via Azure Monitor / Logic App                                                                                    |
-| **Vendor register**      | Compatibility is per vendor + version and changes                             | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner                          |
-| **Tag lifecycle**        | Tag is a bridge, not a destination                                            | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry                                                  |
+| Control                  | Purpose                                                                       | How                                                                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Scale enforcement**    | New NVAs are safe by default                                                  | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`)           |
+| **Continuous discovery** | Catch new/changed VMs & VMSS                                                  | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard                                                          |
+| **Drift alerting**       | Flag an untagged AN NVA on an eligible size                                   | ARG-backed alert via Azure Monitor / Logic App                                                                                              |
+| **Vendor register**      | Compatibility is per vendor + version and changes                             | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner                                    |
+| **Tag lifecycle**        | Tag is a bridge, not a destination                                            | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry                                                            |
 | **MANA opt-in review**   | General / AN-off workloads are candidates for MANA performance gains          | On each re-scan, flag AN-off VMs on eligible sizes for a modernization decision (enable AN + MANA-ready OS/series); not urgent, but tracked |
-| **ODCR / SLA watch**     | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility                                                   |
-| **Evidence & audit**     | Prove due diligence                                                           | Retain `detect`/traffic outputs + policy compliance snapshots                                                                     |
+| **ODCR / SLA watch**     | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility                                                             |
+| **Evidence & audit**     | Prove due diligence                                                           | Retain `detect`/traffic outputs + policy compliance snapshots                                                                               |
 
 ## Timeline gates (act before these)
 
