@@ -1,7 +1,7 @@
 # Implementing the `LegacyVMNVA` Temporary Exception (az CLI)
 
 > All operations below are taken from the official NVA opt-out page. See [references.md](./references.md).
-> **Verified:** 2026-08-03.
+> **Verified:** 2026-08-20.
 
 **Order matters:** Assign policy → Remediate (adds tag) → **Reapply (enables tag)** → Verify. Applying the tag **alone is not sufficient** for existing resources.
 

@@ -2,7 +2,15 @@
 
 Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances change versions, and Azure keeps expanding MANA and adding eligible sizes. This is the model to keep NVAs safe after the first pass.
 
-> Primary goal: **no NVA suffers a surprise networking regression from a MANA placement change — now or later.** The `LegacyVMNVA` tag is a _situational safeguard_ within this loop, not the objective.
+> Primary goals: (1) **no NVA suffers a surprise networking regression from a MANA placement change** — now or later; and (2) **eligible general workloads progressively adopt MANA** to gain its performance, reliability, and resiliency. The `LegacyVMNVA` tag is a _situational safeguard_ within this loop, not the objective.
+
+## Two tracks share the loop
+
+**"No action" is never "ignore forever."** Every workload stays in the re-scan loop under one of two tracks:
+
+- **Risk track (defensive)** — NVAs / AN workloads that could _degrade_ on MANA → verify → `LegacyVMNVA` safeguard → migrate to a MANA-ready config.
+- **Optimization track (opportunity)** — general and **AN-off** workloads are MANA-_safe_ today, but should be **periodically reassessed to opt in**: enable Accelerated Networking on a MANA-ready OS/series to gain throughput and resiliency. They re-enter the loop as optimization candidates, not dead-ends.
+- **AKS is the exception** — Azure adopts MANA for AKS node pools **automatically**; track it for awareness, but it needs no customer action.
 
 ## The loop
 
@@ -15,23 +23,24 @@ Assessment is one-time; **governance is ongoing.** New VMs deploy, appliances ch
 
 ## What to put in place
 
-| Control                  | Purpose                                                                       | How                                                                                                                               |
-| ------------------------ | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **Scale enforcement**    | New NVAs are safe by default                                                  | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`) |
-| **Continuous discovery** | Catch new/changed VMs & VMSS                                                  | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard                                                |
-| **Drift alerting**       | Flag an untagged AN NVA on an eligible size                                   | ARG-backed alert via Azure Monitor / Logic App                                                                                    |
-| **Vendor register**      | Compatibility is per vendor + version and changes                             | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner                          |
-| **Tag lifecycle**        | Tag is a bridge, not a destination                                            | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry                                                  |
-| **ODCR / SLA watch**     | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility                                                   |
-| **Evidence & audit**     | Prove due diligence                                                           | Retain `detect`/traffic outputs + policy compliance snapshots                                                                     |
+| Control                  | Purpose                                                                       | How                                                                                                                                         |
+| ------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Scale enforcement**    | New NVAs are safe by default                                                  | Assign the built-in `LegacyVMNVA` policy at **Management Group** scope (auto-tags in-scope Marketplace NVAs; pin version `1.*.*`)           |
+| **Continuous discovery** | Catch new/changed VMs & VMSS                                                  | Scheduled ARG (`scripts/*.kql`), an Azure Workbook, or Policy compliance dashboard                                                          |
+| **Drift alerting**       | Flag an untagged AN NVA on an eligible size                                   | ARG-backed alert via Azure Monitor / Logic App                                                                                              |
+| **Vendor register**      | Compatibility is per vendor + version and changes                             | Track: appliance, publisher/product, current version, MANA-supported (Y/N), target migration date, owner                                    |
+| **Tag lifecycle**        | Tag is a bridge, not a destination                                            | Apply → validate → migrate → **remove**; ensure nothing relies on it past expiry                                                            |
+| **MANA opt-in review**   | General / AN-off workloads are candidates for MANA performance gains          | On each re-scan, flag AN-off VMs on eligible sizes for a modernization decision (enable AN + MANA-ready OS/series); not urgent, but tracked |
+| **ODCR / SLA watch**     | Tag on capacity-reservation VMs voids ODCR SLA and shrinks the placement pool | Track tagged VMs on ODCR; prioritize their migration to restore SLA eligibility                                                             |
+| **Evidence & audit**     | Prove due diligence                                                           | Retain `detect`/traffic outputs + policy compliance snapshots                                                                               |
 
 ## Timeline gates (act before these)
 
-| Date               | Meaning                                                                     |
-| ------------------ | --------------------------------------------------------------------------- |
-| **May 26, 2026**   | Earliest MANA placement — Cobalt 100 & Intel v5 (public cloud)              |
-| **August 6, 2026** | Earliest MANA placement — Intel v1–v4 (public cloud)                        |
-| **May 31, 2027**   | `LegacyVMNVA` tag **no longer honored** — all reliance must end before this |
+| Date                      | Meaning                                                                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| **May 26, 2026**          | Earliest MANA placement — Intel v5 & Cobalt 100 v6 (public cloud)                                                                           |
+| **Timeline under review** | Earliest placement for all other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, Av2, Fsv2, F, G, Ls, …) — **no published date**; act proactively |
+| **May 31, 2027**          | `LegacyVMNVA` tag **no longer honored** — all reliance must end before this                                                                 |
 
 ## Ownership (RACI, illustrative)
 
