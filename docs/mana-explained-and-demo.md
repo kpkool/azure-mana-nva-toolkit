@@ -1,4 +1,4 @@
-# MANA Explained + Evidence Walkthrough (teach / show guide)
+# MANA Explained + Evidence Walkthrough
 
 A single place to **explain what MANA is** (with a plain-English analogy), then **prove it** with exact,
 real script/query outputs for every case: on MANA, not on MANA, driver missing, hardware missing, traffic
