@@ -11,7 +11,7 @@ attribution, AN disabled, and NVA tagging. Use it to teach the change, the scrip
 
 ## 1. The analogy — MANA is a new highway, not a faster car
 
-The most common misconception is *"MANA makes my network faster."* It doesn't raise your speed limit.
+The most common misconception is _"MANA makes my network faster."_ It doesn't raise your speed limit.
 
 - **Your VM is a car**, and your network traffic is the cars on the road.
 - **The speed limit is your VM size** — Azure ties network bandwidth caps to the **VM size, not the hardware**.
@@ -49,19 +49,19 @@ flowchart LR
 
 ### Analogy → Azure reality → what to check
 
-| Analogy                          | Azure reality                                             | How you see it (this toolkit)                                   |
-| -------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------- |
-| The car                          | Your VM / workload                                        | ARG inventory (`inventory-nva-*.kql`)                          |
-| Speed limit                      | Bandwidth cap **tied to VM size**, not the road           | Docs fact; unchanged by MANA placement                         |
-| Old highway                      | Mellanox / ConnectX host + `mlx5_core` VF driver          | `lspci` = ConnectX; VF driver `mlx5_core`                      |
-| New highway (hardware)           | MANA-capable host                                         | `lspci` = `Device 00ba` (Linux) / `VEN_1414&DEV_00BA` (Windows) |
-| Express lane                     | Accelerated Networking = SR-IOV **Virtual Function (VF)** | A NIC with the `SLAVE` flag bonded to `eth0`                   |
-| Driver who knows the lane        | **MANA OS driver** (Linux kernel / Windows driver)        | VF driver `mana` / adapter "Microsoft Azure Network Adapter"   |
-| Regular lane (fallback)          | **NetVSC** (hypervisor vSwitch) when OS lacks MANA        | On MANA hw but VF driver ≠ `mana` → NetVSC fallback            |
-| Rush hour                        | **High concurrent connection counts**                     | Where MANA's reliability/scale benefit shows                   |
-| Special heavy vehicle            | **NVA** (firewall / router / SD-WAN)                      | `NVAClass` in ARG; validate on host or via vendor              |
-| "Stay on old highway" permit     | **`LegacyVMNVA`** opt-out tag (honored to May 31, 2027)   | Tag + `reapply`; ARG `LegacyVMNVATag` column                  |
-| Fleet with its own dispatcher    | **AKS** (Azure manages the node image/driver)             | Auto-excluded → "AKS-managed - not impacted"                  |
+| Analogy                       | Azure reality                                             | How you see it (this toolkit)                                   |
+| ----------------------------- | --------------------------------------------------------- | --------------------------------------------------------------- |
+| The car                       | Your VM / workload                                        | ARG inventory (`inventory-nva-*.kql`)                           |
+| Speed limit                   | Bandwidth cap **tied to VM size**, not the road           | Docs fact; unchanged by MANA placement                          |
+| Old highway                   | Mellanox / ConnectX host + `mlx5_core` VF driver          | `lspci` = ConnectX; VF driver `mlx5_core`                       |
+| New highway (hardware)        | MANA-capable host                                         | `lspci` = `Device 00ba` (Linux) / `VEN_1414&DEV_00BA` (Windows) |
+| Express lane                  | Accelerated Networking = SR-IOV **Virtual Function (VF)** | A NIC with the `SLAVE` flag bonded to `eth0`                    |
+| Driver who knows the lane     | **MANA OS driver** (Linux kernel / Windows driver)        | VF driver `mana` / adapter "Microsoft Azure Network Adapter"    |
+| Regular lane (fallback)       | **NetVSC** (hypervisor vSwitch) when OS lacks MANA        | On MANA hw but VF driver ≠ `mana` → NetVSC fallback             |
+| Rush hour                     | **High concurrent connection counts**                     | Where MANA's reliability/scale benefit shows                    |
+| Special heavy vehicle         | **NVA** (firewall / router / SD-WAN)                      | `NVAClass` in ARG; validate on host or via vendor               |
+| "Stay on old highway" permit  | **`LegacyVMNVA`** opt-out tag (honored to May 31, 2027)   | Tag + `reapply`; ARG `LegacyVMNVATag` column                    |
+| Fleet with its own dispatcher | **AKS** (Azure manages the node image/driver)             | Auto-excluded → "AKS-managed - not impacted"                    |
 
 ---
 
@@ -70,9 +70,9 @@ flowchart LR
 - **MANA = Microsoft Azure Network Adapter**, a **component of Azure Boost**. A **next-generation network interface**
   with **stable, forward-compatible drivers** for Windows and Linux; **hardware and software both engineered by
   Microsoft**. ([overview](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-overview))
-- **It's not a bandwidth upgrade.** *"Networking limits in Azure are tied to the VM size, not the underlying hardware.
+- **It's not a bandwidth upgrade.** _"Networking limits in Azure are tied to the VM size, not the underlying hardware.
   No change in performance is expected when moving to MANA-capable hardware if your VM's OS supports all network
-  devices."* ([existing-sizes](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes))
+  devices."_ ([existing-sizes](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-existing-sizes))
 - **The value:** performance **at scale** (high connection counts), **reliability**, **resiliency**, and
   **forward-compatible drivers** that reduce future churn.
 - **Feature parity is maintained.** MANA-eligible VMs run on hosts with **both** Mellanox and MANA NICs, so existing
@@ -105,17 +105,17 @@ The end-to-end loop (inventory → verify → safeguard-if-needed → migrate �
 MANA-optimization opt-in) are drawn in the [README](../README.md#how-it-works) and detailed in
 [governance.md](./governance.md). The tag mechanics:
 
-| Question            | Answer                                                                                                          |
-| ------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **What** is the tag | `LegacyVMNVA` — applied by a **built-in Azure Policy** (`e87a87f5-e6dd-4919-be21-abb0a4ea4630`, v1.3.0)         |
-| **What** it does    | Keeps tagged NVA VMs / VMSS **off** MANA-capable hardware while you migrate                                     |
+| Question            | Answer                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **What** is the tag | `LegacyVMNVA` — applied by a **built-in Azure Policy** (`e87a87f5-e6dd-4919-be21-abb0a4ea4630`, v1.3.0)                       |
+| **What** it does    | Keeps tagged NVA VMs / VMSS **off** MANA-capable hardware while you migrate                                                   |
 | **When** to apply   | **Proactively**, for an **AN-based NVA not yet confirmed MANA-compatible** — before a placement change, not after degradation |
-| **When NOT** to     | General workloads, AN-disabled VMs, AKS, or NVAs already MANA-ready — tagging these adds risk/limits (e.g. ODCR SLA) |
-| **How** (existing)  | Assign policy → **remediation** adds tag → **`az vm reapply`** enables it (VMSS Uniform: `reapply` REST) → verify |
-| **How** (new)       | New in-scope deployments are tagged automatically                                                              |
-| **How long**        | Honored **until May 31, 2027**; after that no action required (recommend removing the policy assignment)        |
-| **Gotcha**          | Applying the tag **alone is not enough** for existing resources — the **reapply** step enables it              |
-| **BYO / non-Mktpl** | Built-in policy only tags **listed Marketplace publishers**; for BYO images, tag via your own tooling + reapply |
+| **When NOT** to     | General workloads, AN-disabled VMs, AKS, or NVAs already MANA-ready — tagging these adds risk/limits (e.g. ODCR SLA)          |
+| **How** (existing)  | Assign policy → **remediation** adds tag → **`az vm reapply`** enables it (VMSS Uniform: `reapply` REST) → verify             |
+| **How** (new)       | New in-scope deployments are tagged automatically                                                                             |
+| **How long**        | Honored **until May 31, 2027**; after that no action required (recommend removing the policy assignment)                      |
+| **Gotcha**          | Applying the tag **alone is not enough** for existing resources — the **reapply** step enables it                             |
+| **BYO / non-Mktpl** | Built-in policy only tags **listed Marketplace publishers**; for BYO images, tag via your own tooling + reapply               |
 
 ---
 
@@ -124,15 +124,15 @@ MANA-optimization opt-in) are drawn in the [README](../README.md#how-it-works) a
 Run the `.kql` in **Azure Resource Graph Explorer** (portal) or `az graph query`. Run the host scripts via
 `az vm run-command` — **no SSH/RDP, no public IP**. **Pick `.sh` for Linux, `.ps1` for Windows** (they call OS-native tools).
 
-| Script                                                              | What it answers                                                   | When to run                                       | Why / key signal                                                  |
-| ------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------- |
-| [`inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql)         | Which VMs are candidates? vendor, OS, AN, `NVAClass`, tag, verdict | **First** — fleet-wide triage                     | Control-plane inventory; 6-state `NVAClass` so no vendor is skipped |
-| [`inventory-nva-vmss.kql`](../scripts/inventory-nva-vmss.kql)       | Same, for **scale sets** (AKS-aware)                              | With the VM query                                 | AKS auto-excluded; catches NVAs deployed as VMSS                  |
-| [`discover-vendors.kql`](../scripts/discover-vendors.kql)           | **Every** distinct vendor/plan/OS with `PolicyScoped`/`FirstPartyOS` | Safety net alongside inventory                    | Eyeball unknown/third-party vendors so nothing is missed          |
-| [`detect-mana.sh`](../scripts/detect-mana.sh) / [`.ps1`](../scripts/detect-mana.ps1) | Is **this** VM on MANA? (quick)                   | Per candidate, after inventory                    | `lspci` `00ba` + VF driver `mana` = on MANA                       |
-| [`validate-nva-mana.sh`](../scripts/validate-nva-mana.sh) / [`.ps1`](../scripts/validate-nva-mana.ps1) | Full per-VM verdict (tag+hw+driver+datapath+VF) | When you need a single PASS/FAIL verdict + evidence | Adds the **authoritative** netvsc `dmesg` datapath line          |
-| [`distinguish-vf-mana.sh`](../scripts/distinguish-vf-mana.sh)       | **Which** NIC carried live traffic under load                    | To attribute traffic MANA vs ConnectX             | Driver-specific IRQ families + `dmesg` (counters alone can't tell) |
-| [`traffic-capture.sh`](../scripts/traffic-capture.sh)              | Is traffic actually riding the VF?                                | Quick before/after proof                          | `vf_*` counters jump by the packets you sent                     |
+| Script                                                                                                 | What it answers                                                      | When to run                                         | Why / key signal                                                    |
+| ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
+| [`inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql)                                            | Which VMs are candidates? vendor, OS, AN, `NVAClass`, tag, verdict   | **First** — fleet-wide triage                       | Control-plane inventory; 6-state `NVAClass` so no vendor is skipped |
+| [`inventory-nva-vmss.kql`](../scripts/inventory-nva-vmss.kql)                                          | Same, for **scale sets** (AKS-aware)                                 | With the VM query                                   | AKS auto-excluded; catches NVAs deployed as VMSS                    |
+| [`discover-vendors.kql`](../scripts/discover-vendors.kql)                                              | **Every** distinct vendor/plan/OS with `PolicyScoped`/`FirstPartyOS` | Safety net alongside inventory                      | Eyeball unknown/third-party vendors so nothing is missed            |
+| [`detect-mana.sh`](../scripts/detect-mana.sh) / [`.ps1`](../scripts/detect-mana.ps1)                   | Is **this** VM on MANA? (quick)                                      | Per candidate, after inventory                      | `lspci` `00ba` + VF driver `mana` = on MANA                         |
+| [`validate-nva-mana.sh`](../scripts/validate-nva-mana.sh) / [`.ps1`](../scripts/validate-nva-mana.ps1) | Full per-VM verdict (tag+hw+driver+datapath+VF)                      | When you need a single PASS/FAIL verdict + evidence | Adds the **authoritative** netvsc `dmesg` datapath line             |
+| [`distinguish-vf-mana.sh`](../scripts/distinguish-vf-mana.sh)                                          | **Which** NIC carried live traffic under load                        | To attribute traffic MANA vs ConnectX               | Driver-specific IRQ families + `dmesg` (counters alone can't tell)  |
+| [`traffic-capture.sh`](../scripts/traffic-capture.sh)                                                  | Is traffic actually riding the VF?                                   | Quick before/after proof                            | `vf_*` counters jump by the packets you sent                        |
 
 > **Important nuance:** `vf_*` counters prove the path is **accelerated**, but they are **driver-agnostic** (identical
 > on MANA and Mellanox). To prove **which** NIC family, use the **VF driver name**, the netvsc **`dmesg`** datapath line,
@@ -261,13 +261,13 @@ nva-ac-01  acme-appliances   Third-party publisher (review)    Enabled  Not set 
 
 ## 7. Troubleshooting (quick)
 
-| Symptom                                                        | Fix                                                                          |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `az: 'graph' is not in the 'az' command group`                | `az extension add -n resource-graph`                                        |
-| ARG `InvalidQuery` / `ParserFailure` on an operator           | ARG lacks some KQL operators (e.g. `mv-apply`); use `mv-expand` + `summarize` |
-| `run-command ... execution is in progress` (Conflict)         | One `run-command` per VM at a time — retry after the prior one finishes     |
-| VF interface name changed after redeploy                      | Derive the VF from the `SLAVE` flag; never hardcode (`enP..s1` changes)     |
-| `dmesg` datapath line empty                                   | May need `sudo`, or the ring rotated — re-check after generating traffic    |
+| Symptom                                               | Fix                                                                           |
+| ----------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `az: 'graph' is not in the 'az' command group`        | `az extension add -n resource-graph`                                          |
+| ARG `InvalidQuery` / `ParserFailure` on an operator   | ARG lacks some KQL operators (e.g. `mv-apply`); use `mv-expand` + `summarize` |
+| `run-command ... execution is in progress` (Conflict) | One `run-command` per VM at a time — retry after the prior one finishes       |
+| VF interface name changed after redeploy              | Derive the VF from the `SLAVE` flag; never hardcode (`enP..s1` changes)       |
+| `dmesg` datapath line empty                           | May need `sudo`, or the ring rotated — re-check after generating traffic      |
 
 ---
 
@@ -279,5 +279,5 @@ nva-ac-01  acme-appliances   Third-party publisher (review)    Enabled  Not set 
 - Linux VMs with MANA: <https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-linux>
 - Windows VMs with MANA: <https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-windows>
 - Full list + verified key values: [references.md](./references.md)
-</content>
-</invoke>
+  </content>
+  </invoke>

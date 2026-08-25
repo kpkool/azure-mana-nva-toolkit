@@ -133,18 +133,18 @@ The **authoritative** "which VF carries traffic" signal is the netvsc log line `
 
 ## What's inside
 
-| Path                                                                       | Purpose                                                                       |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| [docs/facts-and-timeline.md](./docs/facts-and-timeline.md)                 | What MANA is, eligible VM series, placement dates, `LegacyVMNVA`, ODCR        |
+| Path                                                                       | Purpose                                                                          |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| [docs/facts-and-timeline.md](./docs/facts-and-timeline.md)                 | What MANA is, eligible VM series, placement dates, `LegacyVMNVA`, ODCR           |
 | [docs/mana-explained-and-demo.md](./docs/mana-explained-and-demo.md)       | Teach/show guide: highway analogy, scripts (what/when/why), evidence walkthrough |
-| [docs/faq.md](./docs/faq.md)                                               | FAQ: AN-disabled action, tag mechanism/dates, non-Marketplace NVAs, ODCR, v6+ |
-| [docs/inventory-arg.md](./docs/inventory-arg.md)                           | Inventory NVA candidates at scale with Azure Resource Graph (multi-NIC safe)  |
-| [docs/verify-mana-nic.md](./docs/verify-mana-nic.md)                       | Verify MANA (Portal, Linux, Windows) — the definitive checks                  |
-| [docs/implementation-legacyvmnva.md](./docs/implementation-legacyvmnva.md) | Apply the opt-out (policy → remediate → reapply → verify → roll back), az CLI |
-| [docs/governance.md](./docs/governance.md)                                 | Continuous governance: scale enforcement, drift, vendor register, RACI, gates |
-| [docs/evidence-lab.md](./docs/evidence-lab.md)                             | Reproducible MVP lab: deploy, detect, capture traffic, compare MANA vs not    |
-| [docs/sample-outputs.md](./docs/sample-outputs.md)                         | Real (anonymized) script/query outputs: Linux, Windows, traffic, ARG          |
-| [docs/references.md](./docs/references.md)                                 | Public Microsoft references + verified key values                             |
+| [docs/faq.md](./docs/faq.md)                                               | FAQ: AN-disabled action, tag mechanism/dates, non-Marketplace NVAs, ODCR, v6+    |
+| [docs/inventory-arg.md](./docs/inventory-arg.md)                           | Inventory NVA candidates at scale with Azure Resource Graph (multi-NIC safe)     |
+| [docs/verify-mana-nic.md](./docs/verify-mana-nic.md)                       | Verify MANA (Portal, Linux, Windows) — the definitive checks                     |
+| [docs/implementation-legacyvmnva.md](./docs/implementation-legacyvmnva.md) | Apply the opt-out (policy → remediate → reapply → verify → roll back), az CLI    |
+| [docs/governance.md](./docs/governance.md)                                 | Continuous governance: scale enforcement, drift, vendor register, RACI, gates    |
+| [docs/evidence-lab.md](./docs/evidence-lab.md)                             | Reproducible MVP lab: deploy, detect, capture traffic, compare MANA vs not       |
+| [docs/sample-outputs.md](./docs/sample-outputs.md)                         | Real (anonymized) script/query outputs: Linux, Windows, traffic, ARG             |
+| [docs/references.md](./docs/references.md)                                 | Public Microsoft references + verified key values                                |
 
 **Scripts** (`scripts/`) — run in-guest via `az vm run-command` (no SSH/RDP), or the `.kql` in Resource Graph Explorer:
 
