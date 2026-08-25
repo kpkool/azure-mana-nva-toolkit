@@ -136,6 +136,7 @@ The **authoritative** "which VF carries traffic" signal is the netvsc log line `
 | Path                                                                       | Purpose                                                                       |
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | [docs/facts-and-timeline.md](./docs/facts-and-timeline.md)                 | What MANA is, eligible VM series, placement dates, `LegacyVMNVA`, ODCR        |
+| [docs/mana-explained-and-demo.md](./docs/mana-explained-and-demo.md)       | Teach/show guide: highway analogy, scripts (what/when/why), evidence walkthrough |
 | [docs/faq.md](./docs/faq.md)                                               | FAQ: AN-disabled action, tag mechanism/dates, non-Marketplace NVAs, ODCR, v6+ |
 | [docs/inventory-arg.md](./docs/inventory-arg.md)                           | Inventory NVA candidates at scale with Azure Resource Graph (multi-NIC safe)  |
 | [docs/verify-mana-nic.md](./docs/verify-mana-nic.md)                       | Verify MANA (Portal, Linux, Windows) — the definitive checks                  |
