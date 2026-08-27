@@ -49,7 +49,7 @@ An **Azure Policy** applies the **`LegacyVMNVA`** tag, which keeps tagged NVA VM
 
 ## How long is the tag honored?
 
-Until **May 31, 2027**. If the tag is applied **and enabled** before that date, the VM avoids MANA placement until then. **After May 31, 2027**, per Microsoft, _"the tag will no longer be honored, and all MANA-eligible VM series may be placed on MANA-capable hardware."_ The tag keeps NVAs off MANA hardware _"while you complete your migration,"_ so have NVAs on a MANA-compatible configuration by then; Microsoft recommends removing the policy assignment afterward.
+Until **May 31, 2027**. If applied **and enabled** before that date, the VM avoids MANA placement until then. **After it**, the tag is no longer honored and MANA-eligible series may be placed on MANA-capable hardware — so make NVAs MANA-compatible before this date. Microsoft recommends removing the policy assignment afterward.
 
 ## What about custom kernels or non-Marketplace NVAs?
 

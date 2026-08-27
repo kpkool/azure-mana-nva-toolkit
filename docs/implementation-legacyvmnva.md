@@ -154,7 +154,7 @@ When your NVA is MANA-compatible:
    ```
 3. For **ODCR** VMs, removing the tag + ensuring MANA compatibility **restores ODCR SLA eligibility**.
 
-> After **May 31, 2027**, per Microsoft, _"the tag will no longer be honored, and all MANA-eligible VM series may be placed on MANA-capable hardware."_ The tag keeps NVAs off MANA hardware _"while you complete your migration,"_ so validate/migrate NVAs to a MANA-compatible configuration before this date. Microsoft recommends **removing the policy assignment** from all subscriptions afterward. Source: [MANA NVA opt-out](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out).
+> **After May 31, 2027**, the tag is no longer honored and MANA-eligible series may be placed on MANA-capable hardware ([Microsoft](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out)). It's a bridge _"while you complete your migration"_ — make NVAs MANA-compatible before this date, then remove the policy assignment.
 
 ---
 
