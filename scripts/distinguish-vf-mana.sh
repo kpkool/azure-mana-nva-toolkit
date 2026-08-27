@@ -44,7 +44,7 @@ fi
 
 echo "=== verdict ==="
 case "${DRV:-}" in
-  mana)  echo "Traffic carried by MANA VF ('$VF', driver mana) — confirmed by MANA counter schema + mana_* IRQs + VF byte delta." ;;
-  mlx*)  echo "Traffic carried by Mellanox/ConnectX VF ('$VF', driver $DRV) — mlx5 counter schema + mlx5 IRQs." ;;
+  mana)  echo "Traffic carried by MANA VF ('$VF', driver mana) -- confirmed by MANA counter schema + mana_* IRQs + VF byte delta." ;;
+  mlx*)  echo "Traffic carried by Mellanox/ConnectX VF ('$VF', driver $DRV) -- mlx5 counter schema + mlx5 IRQs." ;;
   *)     echo "Unknown VF driver '$DRV'." ;;
 esac

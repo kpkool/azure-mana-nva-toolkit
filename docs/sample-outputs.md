@@ -52,6 +52,39 @@ VF interface: enP10697s1
 
 ---
 
+## 2b. Linux — multi-NIC NVA (per-NIC roll-up, real capture)
+
+A 2-NIC VM (the normal NVA topology). Both scripts iterate **every** accelerated VF — never just the first — so no data-plane NIC is missed:
+
+```
+=== accelerated VFs (per-NIC; ALL SLAVE interfaces, not just the first) ===
+  VF enP41580s1 driver='mlx5_core' -> NOT MANA (Mellanox/ConnectX)
+  VF enP19562s2 driver='mlx5_core' -> NOT MANA (Mellanox/ConnectX)
+=== summary (roll-up across ALL NICs) ===
+MANA hardware (lspci 00ba): no; accelerated VFs: 2 (mana=0, non-mana=2)
+=== VF counters (per synthetic NIC) ===
+  [eth0]  vf_rx_packets: 9645 ...
+  [eth1]  vf_rx_packets: 2 ...
+```
+
+`validate-nva-mana.sh` rolls the per-NIC results up to a worst-NIC verdict:
+
+```
+== 2. Accelerated Networking ==
+accelerated VFs found: 2 -> enP41580s1 enP19562s2
+[PASS] Accelerated Networking active on 2 NIC(s): enP41580s1 enP19562s2
+== 4. MANA driver ==
+[INFO] VF enP41580s1 driver = mlx5_core -> Mellanox/ConnectX (not MANA)
+[INFO] VF enP19562s2 driver = mlx5_core -> Mellanox/ConnectX (not MANA)
+== SUMMARY ==
+roll-up: MANA hardware=no, accelerated VFs=2 (mana=0, non-mana=2)
+VERDICT: NOT on MANA (Mellanox/ConnectX) across 2 VF(s). ...
+```
+
+**Verdict:** both NICs enumerated and reported; the worst NIC drives the verdict. On a MANA host, any VF not bound to `mana` is flagged **FAIL** (NetVSC fallback) per NIC.
+
+---
+
 ## 3. Linux — MANA traffic before/after (`scripts/traffic-capture.sh`)
 
 ```
@@ -173,18 +206,27 @@ MicrosoftWindowsServer  Windows  WindowsServer / 2022-datacenter-g2  Platform   
 
 ## 6. Policy assignment + remediation (documented process)
 
-Assigning the built-in policy and running remediation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)):
+Assigning the built-in policy, **granting the managed identity its role**, and running remediation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)):
 
 ```
-# az policy assignment create ... --policy e87a87f5-...
+# 1. az policy assignment create ... --mi-system-assigned
 { "enforcement": "Default", "identity": "SystemAssigned", "name": "LegacyVMNVA-optout" }
 
-# az policy remediation create ...
+# 1b. grant the MI its role -- REQUIRED via CLI (the portal does this automatically; the CLI does NOT)
+#     MI_ID=$(az policy assignment show ... --query identity.principalId -o tsv)
+#     az role assignment create --assignee-object-id $MI_ID --assignee-principal-type ServicePrincipal \
+#       --role b24988ac-6180-42a0-ab88-20f7382dd24c --scope $SCOPE
+# az role assignment list --assignee $MI_ID --scope $SCOPE -o table   ->
+Role         Scope
+-----------  ---------------------------------------------------------------------
+Contributor  /subscriptions/.../resourceGroups/rg-mana-blocker-test
+
+# 2. az policy remediation create ... --policy-assignment <assignment-ID>   (use the ID, not the name)
 { "deploymentStatus": { "failedDeployments": 0, "successfulDeployments": 0, "totalDeployments": 0 },
-  "name": "LegacyVMNVA-remediate", "state": "Succeeded" }
+  "state": "Succeeded" }
 ```
 
-**Verdict:** remediation **Succeeded with 0 deployments** — confirming the built-in policy only tags **Marketplace NVA** publisher/product images. Plain Ubuntu/Windows VMs match nothing, so nothing is tagged (expected). For non-Marketplace/BYO images, use the manual tag + reapply path below.
+**Verdict:** with the role granted, remediation **Succeeded** (0 deployments — the built-in policy only tags **Marketplace NVA** publisher/product images, so plain Ubuntu/Windows VMs match nothing; expected — captured live). **Without step 1b**, the assignment's managed identity has no rights to write the tag, so remediation cannot apply it to matching resources — the **portal auto-grants** these roles but the **CLI/SDK does not** (per Microsoft's [remediation guidance](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources)). For non-Marketplace/BYO images, use the manual tag + reapply path below.
 
 **Manual tag + reapply (BYO / test images):**
 
@@ -197,6 +239,18 @@ Assigning the built-in policy and running remediation (see [implementation-legac
 ---
 
 ## Failure / troubleshooting outputs
+
+**Validator check failed -> UNKNOWN (fail-loud, not a false "safe"):** if IMDS / `Get-PnpDevice` / `Get-NetAdapter` fails, the validator reports **UNKNOWN** instead of a confident negative (expected fail-loud branch):
+
+```
+== 2. MANA hardware (PCI VEN_1414&DEV_00BA) ==
+[ERR ] Get-PnpDevice FAILED (...) -> MANA hardware state UNKNOWN
+== SUMMARY ==
+VERDICT: UNKNOWN - one or more checks failed, so MANA state could NOT be determined (do NOT treat as
+'no action'). Failed: Get-PnpDevice (hardware). Re-run; if it persists, verify IMDS reachability and run elevated.
+```
+
+Why it matters: a transient failure must never look identical to "verified not on MANA / no tag." Re-run once the underlying issue (IMDS reachability, permissions) is resolved.
 
 **Resource Graph extension missing (CLI):**
 

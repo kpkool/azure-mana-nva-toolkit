@@ -14,25 +14,30 @@ echo "=== mana driver present ==="
 (grep "/mana.*\.ko" /lib/modules/"$K"/modules.builtin || find /lib/modules/"$K"/kernel -name 'mana*.ko*') 2>/dev/null || echo "mana.ko not found"
 echo "=== ip link (brief) ==="
 ip -br link
-echo "=== bound NIC driver (definitive: mana vs mlx5) ==="
-PRIMARY=$(ip -o -4 route show to default | awk '{print $5}' | head -n1)
-PRIMARY="${PRIMARY:-eth0}"
-echo "primary interface: $PRIMARY"
-# The accelerated VF is the bonded SLAVE interface (enP* on ConnectX, ens* on MANA)
-VF=$(ip -o link show | awk -F': ' '/SLAVE/{print $2}' | awk '{print $1}' | head -n1)
-echo "VF interface: ${VF:-none}"
-for I in "$PRIMARY" "$VF"; do
-  [ -z "$I" ] && continue
-  DRV=$(ethtool -i "$I" 2>/dev/null | awk -F': ' '/^driver/{print $2}')
-  echo "  $I driver = ${DRV:-unknown}"
-done
-if [ -n "${VF:-}" ]; then
+echo "=== accelerated VFs (per-NIC; ALL SLAVE interfaces, not just the first) ==="
+# Each accelerated NIC exposes a bonded SLAVE VF (enP* on ConnectX, ens* on MANA). Multi-NIC NVAs
+# (firewalls/routers) have several -- check EVERY one, never head -n1, or a data-plane NIC is missed.
+VFS=$(ip -o link show | awk -F': ' '/SLAVE/{print $2}' | awk '{print $1}')
+[ -z "$VFS" ] && echo "no accelerated VF found (Accelerated Networking disabled on all NICs)"
+MANA_VFS=0; NONMANA_VFS=0; VF_COUNT=0
+for VF in $VFS; do
+  VF_COUNT=$((VF_COUNT+1))
   VFDRV=$(ethtool -i "$VF" 2>/dev/null | awk -F': ' '/^driver/{print $2}')
   case "$VFDRV" in
-    mana) echo "  => VF driver 'mana' -> ON MANA" ;;
-    mlx5_core|mlx4_*|mlx*) echo "  => VF driver '$VFDRV' -> NOT MANA (Mellanox/ConnectX)" ;;
-    *) echo "  => VF driver '$VFDRV' -> unknown" ;;
+    mana)                  echo "  VF $VF driver='mana' -> ON MANA"; MANA_VFS=$((MANA_VFS+1)) ;;
+    mlx5_core|mlx4_*|mlx*) echo "  VF $VF driver='$VFDRV' -> NOT MANA (Mellanox/ConnectX)"; NONMANA_VFS=$((NONMANA_VFS+1)) ;;
+    *)                     echo "  VF $VF driver='${VFDRV:-unknown}' -> unknown"; NONMANA_VFS=$((NONMANA_VFS+1)) ;;
   esac
+done
+echo "=== summary (roll-up across ALL NICs) ==="
+if lspci 2>/dev/null | grep -qi "00ba"; then HW=yes; else HW=no; fi
+echo "MANA hardware (lspci 00ba): $HW; accelerated VFs: $VF_COUNT (mana=$MANA_VFS, non-mana=$NONMANA_VFS)"
+if [ "$HW" = yes ] && [ "$NONMANA_VFS" -gt 0 ]; then
+  echo "  WARNING: on MANA hardware but $NONMANA_VFS VF(s) not bound to 'mana' -> NetVSC fallback risk on those NIC(s)"
 fi
-echo "=== VF counters (primary NIC) ==="
-ethtool -S "$PRIMARY" 2>/dev/null | grep -E '^\s*vf_' || echo "no vf_ stats on $PRIMARY"
+echo "=== VF counters (per synthetic NIC) ==="
+# vf_ counters live on the synthetic master (eth0/eth1...), not on the VF; show every synthetic NIC
+for MASTER in $(ip -o link show | awk -F': ' '/BROADCAST/ && !/SLAVE/{print $2}' | awk '{print $1}'); do
+  STATS=$(ethtool -S "$MASTER" 2>/dev/null | grep -E '^\s*vf_')
+  if [ -n "$STATS" ]; then echo "  [$MASTER]"; printf '%s\n' "$STATS" | sed 's/^/    /'; fi
+done

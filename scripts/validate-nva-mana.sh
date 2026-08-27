@@ -39,15 +39,18 @@ else
 fi
 line
 
-# ---- 2. Accelerated Networking (detect the accelerated VF) ----
+# ---- 2. Accelerated Networking (detect EVERY accelerated VF; multi-NIC aware) ----
 echo "== 2. Accelerated Networking =="
-VF=$(ip -o link show | awk -F': ' '/SLAVE/{print $2}' | awk '{print $1}' | head -n1)
-PRIMARY=$(ip -o -4 route show to default | awk '{print $5}' | head -n1); PRIMARY="${PRIMARY:-eth0}"
-echo "primary interface: $PRIMARY   VF (accelerated slave): ${VF:-none}"
-if [ -n "${VF:-}" ]; then
-  row "$PASS" "Accelerated Networking active (VF '$VF' bonded to '$PRIMARY')"
+# Each AN-enabled NIC exposes a bonded SLAVE VF. Multi-NIC NVAs have several -- enumerate ALL of them
+# (never head -n1), or a data-plane NIC's VF is silently skipped and the verdict is a false 'all clear'.
+VFS=$(ip -o link show | awk -F': ' '/SLAVE/{print $2}' | awk '{print $1}')
+VFS_LINE=$(printf '%s' "$VFS" | tr '\n' ' ')   # collapse newline-separated list to one line
+VF_COUNT=0; for _vf in $VFS; do VF_COUNT=$((VF_COUNT+1)); done
+echo "accelerated VFs found: $VF_COUNT -> ${VFS_LINE:-none}"
+if [ "$VF_COUNT" -gt 0 ]; then
+  row "$PASS" "Accelerated Networking active on $VF_COUNT NIC(s): $VFS_LINE"
 else
-  row "$WARN" "No accelerated VF detected -> AN likely Disabled (no MANA action required)"
+  row "$WARN" "No accelerated VF detected -> AN likely Disabled on all NICs (no MANA action required)"
 fi
 line
 
@@ -61,64 +64,73 @@ else
 fi
 line
 
-# ---- 4. MANA driver loaded ----
+# ---- 4. MANA driver loaded (per-NIC across ALL VFs) ----
 echo "== 4. MANA driver =="
 DRV_FILE=$( (grep "/mana.*\.ko" /lib/modules/"$K"/modules.builtin || find /lib/modules/"$K"/kernel -name 'mana*.ko*') 2>/dev/null | head -n1)
 echo "mana.ko: ${DRV_FILE:-not found}"
-VFDRV=""
-if [ -n "${VF:-}" ]; then VFDRV=$(ethtool -i "$VF" 2>/dev/null | awk -F': ' '/^driver/{print $2}'); fi
-echo "VF '$VF' bound driver: ${VFDRV:-none}"
-case "${VFDRV:-}" in
-  mana)                 row "$PASS" "VF driver = mana -> MANA driver loaded and bound" ;;
-  mlx5_core|mlx4_*|mlx*) row "$INFO" "VF driver = ${VFDRV} -> Mellanox/ConnectX (not MANA)" ;;
-  "")                   row "$INFO" "No VF bound driver (AN disabled or no VF)" ;;
-  *)                    row "$WARN" "VF driver = ${VFDRV} -> unexpected" ;;
-esac
-# Fallback / degradation detection: MANA hardware present but driver not bound
-if [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" != "mana" ]; then
-  row "$FAIL" "On MANA hardware but MANA driver NOT bound -> NetVSC fallback risk (update kernel/driver)"
-fi
+MANA_VFS=0; NONMANA_VFS=0
+for VF in $VFS; do
+  VFDRV=$(ethtool -i "$VF" 2>/dev/null | awk -F': ' '/^driver/{print $2}')
+  case "${VFDRV:-}" in
+    mana)                  row "$PASS" "VF $VF driver = mana -> MANA driver loaded and bound"; MANA_VFS=$((MANA_VFS+1)) ;;
+    mlx5_core|mlx4_*|mlx*) row "$INFO" "VF $VF driver = ${VFDRV} -> Mellanox/ConnectX (not MANA)"; NONMANA_VFS=$((NONMANA_VFS+1)) ;;
+    "")                    row "$WARN" "VF $VF has no bound driver"; NONMANA_VFS=$((NONMANA_VFS+1)) ;;
+    *)                     row "$WARN" "VF $VF driver = ${VFDRV} -> unexpected"; NONMANA_VFS=$((NONMANA_VFS+1)) ;;
+  esac
+  # Per-NIC fallback detection: MANA hardware present but this VF not bound to mana
+  if [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" != "mana" ]; then
+    row "$FAIL" "VF $VF: on MANA hardware but not bound to 'mana' -> NetVSC fallback risk (update kernel/driver)"
+  fi
+done
+[ "$MANA_VFS" -eq 0 ] && [ "$NONMANA_VFS" -eq 0 ] && row "$INFO" "No VF bound driver (AN disabled or no VF)"
 # Authoritative: the netvsc driver's own datapath statement (dmesg)
 DP=$(dmesg 2>/dev/null | grep -i "Data path switched" | tail -n1)
 echo "netvsc datapath (dmesg): ${DP:-<none; may need sudo or ring rotated>}"
 if printf '%s' "$DP" | grep -qi "switched to VF"; then
-  row "$PASS" "netvsc reports datapath ON the VF (accelerated path active)"
+  row "$PASS" "netvsc reports datapath ON a VF (accelerated path active)"
 fi
 line
 
-# ---- 5. VF functioning (traffic counters increment) ----
+# ---- 5. VF functioning (traffic counters increment; per synthetic NIC) ----
 echo "== 5. VF functioning (counters) =="
-C1=$(ethtool -S "$PRIMARY" 2>/dev/null | awk '/vf_rx_packets/{print $2; exit}')
-sleep 2
-C2=$(ethtool -S "$PRIMARY" 2>/dev/null | awk '/vf_rx_packets/{print $2; exit}')
-echo "vf_rx_packets: ${C1:-NA} -> ${C2:-NA}"
-if [ -n "${C1:-}" ] && [ -n "${C2:-}" ]; then
-  if [ "$C2" -ge "$C1" ] 2>/dev/null && [ "$C2" -gt 0 ]; then
-    row "$PASS" "VF counters present and non-zero (accelerated datapath in use)"
+# vf_ counters live on the synthetic master (eth0/eth1...). Check every synthetic NIC that exposes them.
+MASTERS=$(ip -o link show | awk -F': ' '/BROADCAST/ && !/SLAVE/{print $2}' | awk '{print $1}')
+ANY_COUNTER=0
+for M in $MASTERS; do
+  C1=$(ethtool -S "$M" 2>/dev/null | awk '/vf_rx_packets/{print $2; exit}')
+  [ -z "${C1:-}" ] && continue
+  ANY_COUNTER=1
+  sleep 1
+  C2=$(ethtool -S "$M" 2>/dev/null | awk '/vf_rx_packets/{print $2; exit}')
+  echo "  [$M] vf_rx_packets: ${C1:-NA} -> ${C2:-NA}"
+  if [ "${C2:-0}" -gt 0 ] 2>/dev/null; then
+    row "$PASS" "VF counters present on $M (accelerated datapath in use)"
   else
-    row "$WARN" "VF counters not incrementing/zero (little traffic, or VF not in use)"
+    row "$WARN" "VF counters flat/zero on $M (little traffic, or VF not in use)"
   fi
-else
-  row "$INFO" "No vf_ stats on $PRIMARY (expected when AN disabled)"
-fi
+done
+[ "$ANY_COUNTER" = "0" ] && row "$INFO" "No vf_ stats on any synthetic NIC (expected when AN disabled)"
 line
 
 # ---- 6. Link sanity (extra tests) ----
 echo "== 6. Link sanity =="
 ip -br link | sed 's/^/  /'
-row "$INFO" "primary '$PRIMARY' state: $(cat /sys/class/net/"$PRIMARY"/operstate 2>/dev/null || echo unknown), MTU $(cat /sys/class/net/"$PRIMARY"/mtu 2>/dev/null || echo ?)"
+for M in $MASTERS; do
+  row "$INFO" "$M state: $(cat /sys/class/net/"$M"/operstate 2>/dev/null || echo unknown), MTU $(cat /sys/class/net/"$M"/mtu 2>/dev/null || echo ?)"
+done
 line
 
-# ---- SUMMARY VERDICT ----
+# ---- SUMMARY VERDICT (roll-up across ALL NICs; the worst NIC drives the verdict) ----
 echo "== SUMMARY =="
 echo "(Reports hardware/driver/AN facts only. NVA-vs-general classification comes from your vendor/CMDB; LegacyVMNVA is only for AN-based NVAs, not general VMs.)"
-if [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" = "mana" ]; then
-  echo "VERDICT: ON MANA, driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series."
-elif [ "${ON_MANA_HW:-0}" = "1" ] && [ "${VFDRV:-}" != "mana" ]; then
-  echo "VERDICT: ON MANA hardware but driver MISSING -> NetVSC fallback. Update OS/kernel or install MANA driver; if NVA degrades keep LegacyVMNVA."
-elif [ -z "${VF:-}" ]; then
-  echo "VERDICT: Accelerated Networking DISABLED -> no MANA action required."
+echo "roll-up: MANA hardware=$([ "${ON_MANA_HW:-0}" = 1 ] && echo yes || echo no), accelerated VFs=$VF_COUNT (mana=$MANA_VFS, non-mana=$NONMANA_VFS)"
+if [ "$VF_COUNT" -eq 0 ]; then
+  echo "VERDICT: Accelerated Networking DISABLED on all NICs -> no MANA action required."
+elif [ "${ON_MANA_HW:-0}" = "1" ] && [ "$NONMANA_VFS" -gt 0 ]; then
+  echo "VERDICT: ON MANA hardware but $NONMANA_VFS of $VF_COUNT VF(s) NOT bound to 'mana' -> NetVSC fallback on those NIC(s). Update OS/kernel or install MANA driver; if an NVA degrades keep LegacyVMNVA."
+elif [ "${ON_MANA_HW:-0}" = "1" ] && [ "$MANA_VFS" -eq "$VF_COUNT" ]; then
+  echo "VERDICT: ON MANA, all $VF_COUNT VF(s) driver working. No action for general workloads. If this is an NVA, validate appliance behavior and consider migrating to a MANA-optimized series."
 else
-  echo "VERDICT: NOT on MANA (Mellanox/ConnectX). No action for general workloads. Apply LegacyVMNVA ONLY if this is an Accelerated-Networking NVA (firewall/router/SD-WAN) not yet confirmed MANA-compatible, before the earliest placement date."
+  echo "VERDICT: NOT on MANA (Mellanox/ConnectX) across $VF_COUNT VF(s). No action for general workloads. Apply LegacyVMNVA ONLY if this is an Accelerated-Networking NVA (firewall/router/SD-WAN) not yet confirmed MANA-compatible, before the earliest placement date."
 fi
 echo "####################################################"
