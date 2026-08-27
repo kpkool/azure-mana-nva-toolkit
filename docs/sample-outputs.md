@@ -206,18 +206,27 @@ MicrosoftWindowsServer  Windows  WindowsServer / 2022-datacenter-g2  Platform   
 
 ## 6. Policy assignment + remediation (documented process)
 
-Assigning the built-in policy and running remediation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)):
+Assigning the built-in policy, **granting the managed identity its role**, and running remediation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)):
 
 ```
-# az policy assignment create ... --policy e87a87f5-...
+# 1. az policy assignment create ... --mi-system-assigned
 { "enforcement": "Default", "identity": "SystemAssigned", "name": "LegacyVMNVA-optout" }
 
-# az policy remediation create ...
+# 1b. grant the MI its role -- REQUIRED via CLI (the portal does this automatically; the CLI does NOT)
+#     MI_ID=$(az policy assignment show ... --query identity.principalId -o tsv)
+#     az role assignment create --assignee-object-id $MI_ID --assignee-principal-type ServicePrincipal \
+#       --role b24988ac-6180-42a0-ab88-20f7382dd24c --scope $SCOPE
+# az role assignment list --assignee $MI_ID --scope $SCOPE -o table   ->
+Role         Scope
+-----------  ---------------------------------------------------------------------
+Contributor  /subscriptions/.../resourceGroups/rg-mana-blocker-test
+
+# 2. az policy remediation create ... --policy-assignment <assignment-ID>   (use the ID, not the name)
 { "deploymentStatus": { "failedDeployments": 0, "successfulDeployments": 0, "totalDeployments": 0 },
-  "name": "LegacyVMNVA-remediate", "state": "Succeeded" }
+  "state": "Succeeded" }
 ```
 
-**Verdict:** remediation **Succeeded with 0 deployments** — confirming the built-in policy only tags **Marketplace NVA** publisher/product images. Plain Ubuntu/Windows VMs match nothing, so nothing is tagged (expected). For non-Marketplace/BYO images, use the manual tag + reapply path below.
+**Verdict:** with the role granted, remediation **Succeeded** (0 deployments — the built-in policy only tags **Marketplace NVA** publisher/product images, so plain Ubuntu/Windows VMs match nothing; expected). **Without step 1b** the same remediation fails with an **authorization error** — the identity has no rights to write the tag. For non-Marketplace/BYO images, use the manual tag + reapply path below.
 
 **Manual tag + reapply (BYO / test images):**
 
@@ -230,6 +239,18 @@ Assigning the built-in policy and running remediation (see [implementation-legac
 ---
 
 ## Failure / troubleshooting outputs
+
+**Validator check failed -> UNKNOWN (fail-loud, not a false "safe"):** if IMDS / `Get-PnpDevice` / `Get-NetAdapter` fails, the validator reports **UNKNOWN** instead of a confident negative (expected fail-loud branch):
+
+```
+== 2. MANA hardware (PCI VEN_1414&DEV_00BA) ==
+[ERR ] Get-PnpDevice FAILED (...) -> MANA hardware state UNKNOWN
+== SUMMARY ==
+VERDICT: UNKNOWN - one or more checks failed, so MANA state could NOT be determined (do NOT treat as
+'no action'). Failed: Get-PnpDevice (hardware). Re-run; if it persists, verify IMDS reachability and run elevated.
+```
+
+Why it matters: a transient failure must never look identical to "verified not on MANA / no tag." Re-run once the underlying issue (IMDS reachability, permissions) is resolved.
 
 **Resource Graph extension missing (CLI):**
 
