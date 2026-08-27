@@ -49,18 +49,40 @@
 Choose scope: Root Management Group (whole tenant) → Management Group (multi-sub) → Subscription → Resource Group.
 
 ```bash
+SCOPE="/subscriptions/<subscription-id>"     # or a resource-group / management-group scope
+
 az policy assignment create \
   --name "LegacyVMNVA-optout" \
   --display-name "LegacyVMNVA MANA opt-out" \
   --policy "e87a87f5-e6dd-4919-be21-abb0a4ea4630" \
-  --scope "/subscriptions/<subscription-id>" \
+  --scope "$SCOPE" \
   --location <region> \
   --mi-system-assigned
 ```
 
-- A managed identity (`--mi-system-assigned`) is required because the policy performs **remediation** (modify/tag).
+- A managed identity (`--mi-system-assigned`) is required because the policy performs **remediation** (a `modify` effect that adds the tag).
 - Pin to minor auto-enrollment by assigning version `1.*.*` so revisions apply automatically.
 - Apply enforcement **gradually** using [Azure Policy safe deployment practices](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/policy-safe-deployment-practices) (incremental rollout by region/resource type).
+
+## Step 1b — Grant the managed identity its role (REQUIRED via CLI)
+
+> **Mandatory and easy to miss.** In the **portal**, Azure Policy auto-grants the identity the roles the policy needs. Via **CLI/SDK it does NOT** — you must grant them yourself, or **Step 2 remediation fails with an authorization error**. The built-in `LegacyVMNVA` policy requires **Contributor** (`b24988ac-6180-42a0-ab88-20f7382dd24c`).
+
+```bash
+# principalId of the assignment's system-assigned identity (avoid the name PID -- it is reserved in PowerShell)
+MI_ID=$(az policy assignment show --name "LegacyVMNVA-optout" --scope "$SCOPE" --query identity.principalId -o tsv)
+
+# grant the role(s) from the policy's roleDefinitionIds (Contributor for this policy) at the assignment scope
+az role assignment create \
+  --assignee-object-id "$MI_ID" \
+  --assignee-principal-type ServicePrincipal \
+  --role "b24988ac-6180-42a0-ab88-20f7382dd24c" \
+  --scope "$SCOPE"
+```
+
+> Confirm the exact role(s) for the version you assigned:
+> `az policy definition show --name e87a87f5-e6dd-4919-be21-abb0a4ea4630 --query policyRule.then.details.roleDefinitionIds -o tsv`
+> Allow ~30–60s for the role assignment to propagate before running remediation.
 
 > **New deployments** within the assigned scope get the `LegacyVMNVA` tag **automatically** — Steps 2–3 are only for **existing** resources.
 
@@ -69,9 +91,12 @@ az policy assignment create \
 ## Step 2 — Remediate existing resources (adds the tag)
 
 ```bash
+# reference the assignment by ID (robust if an assignment of the same name is inherited from a higher scope)
+ASSIGN_ID=$(az policy assignment show --name "LegacyVMNVA-optout" --scope "$SCOPE" --query id -o tsv)
+
 az policy remediation create \
   --name "LegacyVMNVA-remediate" \
-  --policy-assignment "LegacyVMNVA-optout" \
+  --policy-assignment "$ASSIGN_ID" \
   --resource-group <resource-group-name>
 ```
 

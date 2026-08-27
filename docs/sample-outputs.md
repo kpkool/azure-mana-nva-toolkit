@@ -52,6 +52,39 @@ VF interface: enP10697s1
 
 ---
 
+## 2b. Linux — multi-NIC NVA (per-NIC roll-up, real capture)
+
+A 2-NIC VM (the normal NVA topology). Both scripts iterate **every** accelerated VF — never just the first — so no data-plane NIC is missed:
+
+```
+=== accelerated VFs (per-NIC; ALL SLAVE interfaces, not just the first) ===
+  VF enP41580s1 driver='mlx5_core' -> NOT MANA (Mellanox/ConnectX)
+  VF enP19562s2 driver='mlx5_core' -> NOT MANA (Mellanox/ConnectX)
+=== summary (roll-up across ALL NICs) ===
+MANA hardware (lspci 00ba): no; accelerated VFs: 2 (mana=0, non-mana=2)
+=== VF counters (per synthetic NIC) ===
+  [eth0]  vf_rx_packets: 9645 ...
+  [eth1]  vf_rx_packets: 2 ...
+```
+
+`validate-nva-mana.sh` rolls the per-NIC results up to a worst-NIC verdict:
+
+```
+== 2. Accelerated Networking ==
+accelerated VFs found: 2 -> enP41580s1 enP19562s2
+[PASS] Accelerated Networking active on 2 NIC(s): enP41580s1 enP19562s2
+== 4. MANA driver ==
+[INFO] VF enP41580s1 driver = mlx5_core -> Mellanox/ConnectX (not MANA)
+[INFO] VF enP19562s2 driver = mlx5_core -> Mellanox/ConnectX (not MANA)
+== SUMMARY ==
+roll-up: MANA hardware=no, accelerated VFs=2 (mana=0, non-mana=2)
+VERDICT: NOT on MANA (Mellanox/ConnectX) across 2 VF(s). ...
+```
+
+**Verdict:** both NICs enumerated and reported; the worst NIC drives the verdict. On a MANA host, any VF not bound to `mana` is flagged **FAIL** (NetVSC fallback) per NIC.
+
+---
+
 ## 3. Linux — MANA traffic before/after (`scripts/traffic-capture.sh`)
 
 ```
