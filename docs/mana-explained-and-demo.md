@@ -105,17 +105,17 @@ The end-to-end loop (inventory → verify → safeguard-if-needed → migrate �
 MANA-optimization opt-in) are drawn in the [README](../README.md#how-it-works) and detailed in
 [governance.md](./governance.md). The tag mechanics:
 
-| Question            | Answer                                                                                                                        |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **What** is the tag | `LegacyVMNVA` — applied by a **built-in Azure Policy** (`e87a87f5-e6dd-4919-be21-abb0a4ea4630`, v1.3.0)                       |
-| **What** it does    | Keeps tagged NVA VMs / VMSS **off** MANA-capable hardware while you migrate                                                   |
-| **When** to apply   | **Proactively**, for an **AN-based NVA not yet confirmed MANA-compatible** — before a placement change, not after degradation |
-| **When NOT** to     | General workloads, AN-disabled VMs, AKS, or NVAs already MANA-ready — tagging these adds risk/limits (e.g. ODCR SLA)          |
-| **How** (existing)  | Assign policy → **remediation** adds tag → **`az vm reapply`** enables it (VMSS Uniform: `reapply` REST) → verify             |
-| **How** (new)       | New in-scope deployments are tagged automatically                                                                             |
-| **How long**        | Honored **until May 31, 2027**; after that no action required (recommend removing the policy assignment)                      |
-| **Gotcha**          | Applying the tag **alone is not enough** for existing resources — the **reapply** step enables it                             |
-| **BYO / non-Mktpl** | Built-in policy only tags **listed Marketplace publishers**; for BYO images, tag via your own tooling + reapply               |
+| Question            | Answer                                                                                                                                                               |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What** is the tag | `LegacyVMNVA` — applied by a **built-in Azure Policy** (`e87a87f5-e6dd-4919-be21-abb0a4ea4630`, v1.3.0)                                                              |
+| **What** it does    | Keeps tagged NVA VMs / VMSS **off** MANA-capable hardware while you migrate                                                                                          |
+| **When** to apply   | **Proactively**, for an **AN-based NVA not yet confirmed MANA-compatible** — before a placement change, not after degradation                                        |
+| **When NOT** to     | General workloads, AN-disabled VMs, AKS, or NVAs already MANA-ready — tagging these adds risk/limits (e.g. ODCR SLA)                                                 |
+| **How** (existing)  | Assign policy → **remediation** adds tag → **`az vm reapply`** enables it (VMSS Uniform: `reapply` REST) → verify                                                    |
+| **How** (new)       | New in-scope deployments are tagged automatically                                                                                                                    |
+| **How long**        | Honored **until May 31, 2027**; per Microsoft, after that the tag is no longer honored and MANA-eligible series may be placed on MANA hardware. Migrate NVAs to MANA-compatible before then; remove the policy assignment afterward. |
+| **Gotcha**          | Applying the tag **alone is not enough** for existing resources — the **reapply** step enables it                                                                    |
+| **BYO / non-Mktpl** | Built-in policy only tags **listed Marketplace publishers**; for BYO images, tag via your own tooling + reapply                                                      |
 
 ---
 

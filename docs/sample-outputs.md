@@ -226,7 +226,7 @@ Contributor  /subscriptions/.../resourceGroups/rg-mana-blocker-test
   "state": "Succeeded" }
 ```
 
-**Verdict:** with the role granted, remediation **Succeeded** (0 deployments — the built-in policy only tags **Marketplace NVA** publisher/product images, so plain Ubuntu/Windows VMs match nothing; expected). **Without step 1b** the same remediation fails with an **authorization error** — the identity has no rights to write the tag. For non-Marketplace/BYO images, use the manual tag + reapply path below.
+**Verdict:** with the role granted, remediation **Succeeded** (0 deployments — the built-in policy only tags **Marketplace NVA** publisher/product images, so plain Ubuntu/Windows VMs match nothing; expected — captured live). **Without step 1b**, the assignment's managed identity has no rights to write the tag, so remediation cannot apply it to matching resources — the **portal auto-grants** these roles but the **CLI/SDK does not** (per Microsoft's [remediation guidance](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources)). For non-Marketplace/BYO images, use the manual tag + reapply path below.
 
 **Manual tag + reapply (BYO / test images):**
 
