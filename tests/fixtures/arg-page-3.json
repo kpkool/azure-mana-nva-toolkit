@@ -1,0 +1,32 @@
+{
+  "count": 1,
+  "data": [
+    {
+      "subscriptionId": "00000000-0000-0000-0000-000000000001",
+      "resourceGroup": "rg-fixture",
+      "VMName": "vm-nic-missing",
+      "VMId": "/subscriptions/00000000-0000-0000-0000-000000000001/resourceGroups/rg-fixture/providers/Microsoft.Compute/virtualMachines/vm-nic-missing",
+      "NICName": null,
+      "NICId": null,
+      "NICPrimary": null,
+      "AcceleratedNetworking": null,
+      "ExposureStatus": "UNKNOWN",
+      "ReadinessStatus": "UNKNOWN",
+      "Confidence": "LOW",
+      "ReasonCode": "NIC_DATA_MISSING",
+      "RequiredAction": "REVIEW_RESOURCE_LINKAGE",
+      "NVAClass": "General (platform OS)",
+      "ImageSource": "Platform",
+      "Vendor": "canonical",
+      "PlanPublisher": "",
+      "PlanProduct": "",
+      "OSType": "Linux",
+      "OSVersion": "ubuntu-24_04-lts / server",
+      "VMSize": "Standard_D4s_v5",
+      "LegacyVMNVATag": "Not set",
+      "location": "westus"
+    }
+  ],
+  "skip_token": null,
+  "total_records": 5
+}

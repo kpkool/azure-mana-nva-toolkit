@@ -1,7 +1,7 @@
 # How to Verify Whether a VM Is on MANA-Capable Hardware
 
 > Commands and outputs below are taken from the official Microsoft Learn pages. See [references.md](./references.md).
-> **Verified:** 2026-08-20.
+> **Verified:** 2026-09-03.
 
 MANA requires **both** host hardware support **and** VM software (driver) support. Run all applicable checks: **Portal (AN enabled) → Hardware (PCI device) → Driver → Traffic**.
 
@@ -36,14 +36,16 @@ MANA is present when you see the Microsoft Ethernet controller `Device 00ba`, e.
 
 If you see a different Ethernet controller (e.g., `Mellanox … ConnectX-5`), you are **not** on MANA.
 
-### 1b. Driver check — the definitive discriminator (`mana` vs `mlx5_core`)
+### 1b. Driver check — direct NIC-family discriminator (`mana` vs `mlx5_core`)
 
-The accelerated Virtual Function (VF) is the bonded **SLAVE** interface (named `enP*` on ConnectX, `ens*` on MANA). Check its driver:
+The accelerated Virtual Function (VF) may appear as `CHILD` on current kernels or as `SLAVE` on older NetVSC paths. For a `SLAVE`, confirm that its master uses `hv_netvsc` so an ordinary bond member is not misclassified. Names such as `enP*` and `ens*` are observations, not stable identifiers.
 
 ```bash
-# find the VF (bonded SLAVE) interface, then read its driver
-VF=$(ip -o link show | awk -F': ' '/SLAVE/{print $2}' | awk '{print $1}' | head -n1)
-ethtool -i "$VF" | grep '^driver'
+# inspect all relationships; do not select only the first interface
+ip -o link show | grep -E '<[^>]*(CHILD|SLAVE)[^>]*>'
+
+# run the multi-NIC-safe discovery and driver checks
+bash scripts/detect-mana.sh
 ```
 
 - `driver: mana` → **ON MANA**
@@ -63,7 +65,7 @@ Expected (built-in or module present):
 kernel/drivers/net/ethernet/microsoft/mana/mana.ko
 ```
 
-**Kernel support:** MANA Ethernet drivers first landed upstream in **kernel 5.15+**. Kernel **6.2** adds InfiniBand/RDMA and DPDK. Kernels 5.15 / 6.1 need backported support. **DPDK on MANA requires kernel 6.14+** (or backported drivers).
+**Kernel support:** MANA Ethernet drivers first landed upstream in **kernel 5.15**. Kernel **6.2** added upstream support for features including InfiniBand/RDMA and DPDK; earlier or forked 5.15/6.1 kernels require backported support. The current requirement to **run DPDK on MANA** is kernel **6.14+** or backports of the 6.14+ Ethernet and InfiniBand drivers.
 
 ### 1d. Traffic check — is traffic flowing through the accelerated VF?
 
@@ -84,7 +86,7 @@ ethtool -S eth0 | grep -E "^\s*vf_"
 
 If VF values are `0` or don't increment, you are **not** using the virtual function. (Note: `vf_*` counters exist on both MANA and ConnectX — they prove the accelerated data path, not MANA specifically. Confirm MANA via the driver/PCI checks above.)
 
-### 1e. Authoritative datapath (netvsc's own statement)
+### 1e. NetVSC-reported datapath
 
 ```bash
 sudo dmesg | grep -i "Data path switched" | tail -n2
@@ -94,7 +96,7 @@ sudo dmesg | grep -i "Data path switched" | tail -n2
 hv_netvsc ... eth0: Data path switched to VF: ens1
 ```
 
-The netvsc driver logs **which VF** the datapath is on. Combined with `ethtool -i <vf>` (`mana` vs `mlx5_core`), this is the definitive attribution of _which_ NIC carries traffic. To prove it live under load — and see driver-specific IRQs (`mana_q*` vs `mlx5_comp*`) and per-VF byte deltas — run [`../scripts/distinguish-vf-mana.sh`](../scripts/distinguish-vf-mana.sh). For a full per-VM verdict in one pass, run [`../scripts/validate-nva-mana.sh`](../scripts/validate-nva-mana.sh) (Linux) / [`../scripts/validate-nva-mana.ps1`](../scripts/validate-nva-mana.ps1) (Windows).
+The netvsc driver logs **which VF** it selected. Combine that mapping with `ethtool -i <vf>` (`mana` vs `mlx5_core`) and live counter deltas to attribute the tested traffic path. To collect driver-specific IRQs (`mana_q*` vs `mlx5_comp*`) and per-VF byte deltas under load, run [`../scripts/distinguish-vf-mana.sh`](../scripts/distinguish-vf-mana.sh). For a full per-VM verdict in one pass, run [`../scripts/validate-nva-mana.sh`](../scripts/validate-nva-mana.sh) (Linux) / [`../scripts/validate-nva-mana.ps1`](../scripts/validate-nva-mana.ps1) (Windows).
 
 ---
 
@@ -147,7 +149,7 @@ If the MANA values are `0` or don't increment, you are **not** using the virtual
 
 ### 2e. Install Windows MANA drivers (if hardware present but driver missing)
 
-Download: https://aka.ms/manawindowsdrivers (includes a readme with detailed instructions).
+Download: <https://aka.ms/manawindowsdrivers> (includes a readme with detailed instructions).
 
 ---
 
@@ -155,9 +157,12 @@ Download: https://aka.ms/manawindowsdrivers (includes a readme with detailed ins
 
 | Observation                                       | Meaning                                                   | Action                                                                                    |
 | ------------------------------------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| AN disabled                                       | Workload unaffected by MANA change                        | No action                                                                                 |
+| AN disabled on the Azure NIC resource             | Workload unaffected by the AN hardware transition         | No MANA action                                                                            |
 | VF driver `mana` + `00ba` + VF counters increment | On MANA, working                                          | General VM: no action. NVA: validate appliance behavior, consider a MANA-optimized series |
 | `00ba` present, no accelerated VF exposed         | On MANA hardware, OS lacks MANA support → NetVSC fallback | Update OS/kernel or install driver; if an NVA degrades, consider `LegacyVMNVA`            |
-| VF driver `mlx5_core` / no `00ba`                 | Not on MANA (ConnectX)                                    | General VM: no action. NVA: apply `LegacyVMNVA` before earliest placement date            |
+| VF driver `mlx5_core` / no `00ba`                 | Not on MANA (ConnectX)                                    | Review support and pilot before placement changes; tag only if degraded/provider-directed |
 
-> The `LegacyVMNVA` tag is **only** for Accelerated-Networking NVAs (firewalls/routers/SD-WAN) not yet confirmed MANA-compatible. General workloads (app/web/db) need **no action** — MANA transition is transparent. These in-guest checks report hardware/driver/AN facts; NVA classification comes from the ARG vendor/publisher or your CMDB.
+> The `LegacyVMNVA` tag is **only** for eligible Accelerated-Networking NVAs (firewalls/routers/SD-WAN) when
+> the vendor directs an opt-out or degradation is observed. General workloads do not use this NVA exception;
+> verify OS support and a representative workload baseline. Azure NIC configuration is authoritative for AN;
+> guest checks report hardware, driver, and datapath evidence.

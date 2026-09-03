@@ -1,0 +1,149 @@
+// =============================================================================
+// Azure Resource Graph -- per-NIC MANA exposure inventory
+// =============================================================================
+// Purpose: emit one record per attached VM NIC without claiming guest or vendor
+// readiness from control-plane data.
+//
+// Status contract:
+//   ExposureStatus  -- NOT_EXPOSED when AN is disabled, POTENTIAL when AN is
+//                      enabled, UNKNOWN when NIC linkage is missing.
+//   ReadinessStatus -- NOT_APPLICABLE when AN is disabled; otherwise UNKNOWN.
+//                      ARG cannot prove current MANA placement or workload safety.
+//   Confidence      -- confidence in this control-plane classification only.
+//   ReasonCode      -- stable machine-readable explanation.
+//   RequiredAction  -- next evidence step; never an automatic compatibility claim.
+//
+// Scope: standalone VMs and VMSS Flex member instances. VMSS Uniform model NICs
+// are covered by inventory-nva-vmss.kql and require instance-level validation.
+// =============================================================================
+
+Resources
+| where type =~ 'microsoft.compute/virtualmachines'
+| extend img = properties.storageProfile.imageReference
+| extend
+    ImgPublisher   = tostring(img.publisher),
+    Offer          = tostring(img.offer),
+    Sku            = tostring(img.sku),
+    GalleryImageId = tostring(img.id),
+    PlanPublisher  = tostring(plan.publisher),
+    PlanProduct    = tostring(plan.product),
+    PlanName       = tostring(plan.name),
+    OSType         = tostring(properties.storageProfile.osDisk.osType),
+    LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), 'Not set')
+| extend Vendor = iff(isnotempty(PlanPublisher), PlanPublisher, iff(isnotempty(ImgPublisher), ImgPublisher, 'unknown/custom'))
+| extend OSVersion = iff(isnotempty(Sku), strcat(Offer, ' / ', Sku), 'custom image (no publisher/sku)')
+| extend ImageSource = case(
+    isnotempty(PlanName), 'Marketplace',
+    isnotempty(GalleryImageId), 'Gallery/Custom',
+    isnotempty(ImgPublisher), 'Platform',
+    'Custom/VHD')
+| extend _nvaPublishers = dynamic([
+    'arista-networks','asdivertissementinc1617837708654','avi-networks','aviatrix-systems',
+    'barracudanetworks','bluecat','checkpoint','cisco','citrix','cohesive',
+    'daceitdbasensetrafficpulse1579892024934','ergoninformatikag1581586464404','f5-networks',
+    'fatalsecurity1604924013537','fortinet','haproxy-technologies','heimdall-data','hillstone-networks',
+    'imperva','ivanti-vadc','juniper-networks','kemptech','netapp','netgate','netskope','nttltd',
+    'paloaltonetworks','pulse-secure','radware','riverbed','silver-peak-systems','sonicwall-inc',
+    'sophos','technicheltd1606969724100','trendmicro','twistlock','velocloud','versanetworks',
+    'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
+| extend _pubLower = tolower(trim(' ', Vendor))
+// Publisher membership is only a discovery hint. The built-in policy also matches specific
+// Marketplace product IDs, so this query does not claim exact policy applicability.
+| extend _publisherListed = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
+| extend _hay = tolower(strcat(Vendor, ' ', PlanProduct, ' ', Offer, ' ', Sku, ' ', name))
+| extend _kwHit = _hay matches regex 'firewall|fortinet|fortigate|palo ?alto|pan-?os|check ?point|cisco|f5|big-?ip|barracuda|sonicwall|sophos|watchguard|zscaler|netskope|versa|velocloud|sd-?wan|ngfw|aviatrix|arista|juniper|netscaler|imperva|radware|riverbed|silver-?peak|els?ity'
+| extend _recognizedOSPublishers = dynamic([
+    'canonical','redhat','suse','debian','credativ','oracle','openlogic',
+    'almalinux','resf','rockylinux','kali-linux'])
+| extend _recognizedOSPublisher = set_has_element(_recognizedOSPublishers, _pubLower) or _pubLower startswith 'microsoft'
+| extend NVAClass = case(
+    _publisherListed, 'Publisher-listed NVA (product match unverified)',
+    isnotempty(PlanPublisher), 'Marketplace - not in policy list (review)',
+    _kwHit, 'Possible NVA - keyword hint (review)',
+    ImageSource in ('Gallery/Custom','Custom/VHD'), 'Custom/unknown image (review)',
+    not(_recognizedOSPublisher), 'Third-party publisher (review)',
+    'General (platform OS)')
+| project
+    vmId = tolower(id),
+    VMId = id,
+    VMName = name,
+    VMSize = tostring(properties.hardwareProfile.vmSize),
+    Vendor,
+    PlanPublisher,
+    PlanProduct,
+    NVAClass,
+    ImageSource,
+    OSType,
+    OSVersion,
+    LegacyVMNVATag,
+    resourceGroup,
+    subscriptionId,
+    location
+| join kind=leftouter (
+    Resources
+    | where type =~ 'microsoft.network/networkinterfaces'
+    | where isnotempty(properties.virtualMachine.id)
+    | project
+        vmId = tolower(tostring(properties.virtualMachine.id)),
+        NICId = id,
+        NICName = name,
+        NICPrimary = iff(properties.primary == true, 'Yes', 'No'),
+        AcceleratedNetworking = iff(properties.enableAcceleratedNetworking == true, 'Enabled', 'Disabled')
+) on vmId
+| extend _nicFound = isnotempty(NICId), _anEnabled = AcceleratedNetworking == 'Enabled'
+| extend ExposureStatus = case(
+    not(_nicFound), 'UNKNOWN',
+    _anEnabled, 'POTENTIAL',
+    'NOT_EXPOSED')
+| extend ReadinessStatus = case(
+    not(_nicFound), 'UNKNOWN',
+    not(_anEnabled), 'NOT_APPLICABLE',
+    'UNKNOWN')
+| extend Confidence = case(
+    not(_nicFound), 'LOW',
+    not(_anEnabled), 'HIGH',
+    NVAClass == 'General (platform OS)', 'MEDIUM',
+    'LOW')
+| extend ReasonCode = case(
+    not(_nicFound), 'NIC_DATA_MISSING',
+    not(_anEnabled), 'AN_DISABLED',
+    LegacyVMNVATag != 'Not set', 'LEGACYVMNVA_TAG_PRESENT',
+    NVAClass == 'Publisher-listed NVA (product match unverified)', 'AN_ENABLED_PUBLISHER_LISTED_NVA',
+    NVAClass startswith 'Marketplace', 'AN_ENABLED_MARKETPLACE_REVIEW',
+    NVAClass startswith 'Possible', 'AN_ENABLED_NVA_KEYWORD_HINT',
+    NVAClass startswith 'Custom', 'AN_ENABLED_CUSTOM_IMAGE',
+    NVAClass startswith 'Third-party', 'AN_ENABLED_THIRD_PARTY_PUBLISHER',
+    'AN_ENABLED_GENERAL_PLATFORM_IMAGE')
+| extend RequiredAction = case(
+    ReasonCode == 'NIC_DATA_MISSING', 'REVIEW_RESOURCE_LINKAGE',
+    ReasonCode == 'AN_DISABLED', 'NONE_FOR_MANA_RISK',
+    ReasonCode == 'LEGACYVMNVA_TAG_PRESENT', 'CONFIRM_TAG_ENABLED_AND_PLAN_MIGRATION',
+    ReasonCode == 'AN_ENABLED_PUBLISHER_LISTED_NVA', 'VERIFY_POLICY_PRODUCT_VENDOR_SUPPORT_AND_RUN_PILOT',
+    ReasonCode in ('AN_ENABLED_MARKETPLACE_REVIEW','AN_ENABLED_NVA_KEYWORD_HINT','AN_ENABLED_THIRD_PARTY_PUBLISHER'), 'CONFIRM_WORKLOAD_AND_VENDOR_SUPPORT',
+    ReasonCode == 'AN_ENABLED_CUSTOM_IMAGE', 'VERIFY_IMAGE_DRIVERS_AND_CUSTOM_NIC_CONFIG',
+    'RUN_GUEST_VALIDATION')
+| project
+    subscriptionId,
+    resourceGroup,
+    VMName,
+    VMId,
+    NICName,
+    NICId,
+    NICPrimary,
+    AcceleratedNetworking,
+    ExposureStatus,
+    ReadinessStatus,
+    Confidence,
+    ReasonCode,
+    RequiredAction,
+    NVAClass,
+    ImageSource,
+    Vendor,
+    PlanPublisher,
+    PlanProduct,
+    OSType,
+    OSVersion,
+    VMSize,
+    LegacyVMNVATag,
+    location
+| order by VMId asc, NICId asc

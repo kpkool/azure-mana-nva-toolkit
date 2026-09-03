@@ -1,16 +1,16 @@
 # Evidence Lab — Verify MANA NIC Status & Traffic (MVP, az CLI only)
 
-> **Purpose:** Produce reproducible, customer-ready evidence that shows (a) a VM **on MANA** with the MANA VF active and traffic flowing through it, and (b) a VM **not on MANA** (ConnectX) and/or kept off MANA via the `LegacyVMNVA` opt-out. Capture NIC status + traffic counters as proof.
+> **Purpose:** Produce reproducible, customer-ready evidence that shows (a) a VM **on MANA** with the MANA VF active and traffic flowing through it, and (b) a VM **not on MANA** (ConnectX) and/or temporarily kept off MANA via an applied and enabled `LegacyVMNVA` opt-out. Capture NIC identity, driver, datapath, and traffic-counter evidence.
 >
-> **Accuracy note:** Detection commands are cross-checked with [verify-mana-nic.md](./verify-mana-nic.md) and the official pages in [references.md](./references.md). Reference results below were captured on a real run; your placement outcome will vary (see caveat).
+> **Accuracy note:** Detection commands are cross-checked with [verify-mana-nic.md](./verify-mana-nic.md) and the official pages in [references.md](./references.md). Captured Linux and control-plane results are identified below; Windows MANA AFTER evidence remains pending. Your placement outcome will vary.
 
 ---
 
 ## Read first — what is and isn't controllable
 
 - **Azure controls hardware placement.** You **cannot** force a VM onto MANA hardware with a flag. A VM on an eligible series with a MANA-capable OS and Accelerated Networking (AN) _may_ land on MANA, and can be re-placed after a **stop-deallocate-and-start**.
-- **VM size strongly influences the outcome.** In testing, an older eligible size (`D4s_v5`) stayed on ConnectX even after re-rolls, while a newer MANA-optimized size (`D4ds_v6`) landed on MANA on first boot. Newer (v6) sizes are far more likely to get MANA — still not guaranteed.
-- **The only supported lever to guarantee "off MANA"** is the **`LegacyVMNVA` opt-out** (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)).
+- **Series determines the documented hardware model.** Eligible existing series may use Mellanox or MANA. Microsoft documents Intel v6 or later as running on MANA-capable hardware. In this lab only, `D4s_v5` stayed on ConnectX and `D4ds_v6` used MANA; this sample does not establish placement probability for other sizes, regions, or zones.
+- For an applicable AN-enabled NVA, the documented temporary placement-avoidance mechanism is an **applied and enabled `LegacyVMNVA` tag** (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)). It is honored only until May 31, 2027.
 - This lab is **detection-and-evidence first**: deploy → detect actual placement → capture whatever state you observe.
 
 ---
@@ -21,7 +21,7 @@
 - Permissions to create VMs/NICs (and, for the opt-out, assign Azure Policy + run remediation).
 - Azure CLI signed in: `az login` and `az account set --subscription <subscription-id>`.
 
-> **OS choice:** use an image whose kernel supports MANA. MANA Ethernet drivers are upstream in **Linux kernel 5.15+** (6.2 adds IB/RDMA & DPDK). Confirm against the [supported OS list](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-overview#supported-operating-systems). A recent Ubuntu LTS (kernel ≥ 6.2) is a reasonable default; **verify** rather than assume.
+> **OS choice:** use an image whose distribution kernel supports MANA. MANA Ethernet drivers first appeared upstream in **Linux kernel 5.15**; kernel 6.2 added upstream support for features including InfiniBand/RDMA and DPDK. The current requirement to **run DPDK on MANA** is kernel **6.14+** or backports of the 6.14+ Ethernet and InfiniBand drivers. Confirm the distribution-specific minimum against the [supported OS list](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-overview#supported-operating-systems) and the [MANA DPDK requirements](https://learn.microsoft.com/en-us/azure/virtual-network/setup-dpdk-mana#dpdk-requirements-for-mana).
 
 ---
 
@@ -34,8 +34,8 @@ SUBNET_ID="/subscriptions/<subscription-id>/resourceGroups/<network-rg>/provider
 IMAGE="Canonical:ubuntu-24_04-lts:server:latest"   # gen2; verify MANA/kernel support
 ADMIN="azureuser"
 
-VM_MANA="vm-mana-v6"                  # MANA-optimized v6 size (more likely to get MANA)
-VM_CX="vm-mana-a"                     # older v5 size (likely ConnectX) — contrast
+VM_MANA="vm-mana-v6"                  # documented MANA-based Intel v6 target
+VM_CX="vm-mana-a"                     # eligible existing-series contrast; detect actual placement
 VM_OPTOUT="vm-legacy-b"               # opt-out control (LegacyVMNVA)
 ```
 
@@ -88,7 +88,7 @@ az vm run-command invoke -g "$RG" -n "$VM_MANA" --command-id RunShellScript \
   --query "value[0].message" -o tsv
 ```
 
-VF byte/packet counters should jump by the number of packets sent, proving traffic rides the accelerated VF.
+VF byte/packet counters should increase during the test, indicating that traffic used the accelerated VF. The counters do not identify MANA by themselves; pair them with driver and PCI evidence.
 
 ---
 
@@ -104,9 +104,9 @@ az vm show -g "$RG" -n "$VM_OPTOUT" --query "tags" -o json
 
 ---
 
-## Step 5 — Re-roll placement (if the candidate didn't get MANA)
+## Step 5 — Reallocate and re-detect an eligible existing-series VM
 
-Documented behavior: existing VMs can move to MANA hardware after a stop-deallocate-and-start.
+Documented behavior: existing VMs may land on MANA hardware after a stop-deallocate-and-start. This operation does not guarantee MANA placement.
 
 ```bash
 az vm deallocate -g "$RG" -n "$VM_MANA"
@@ -126,44 +126,48 @@ az group delete -n "$RG" --yes --no-wait
 
 ## MANA-enabled vs NOT — validation comparison
 
-The definitive discriminator is the **bound VF driver**:
+The direct NIC-family discriminator is the **bound VF driver**:
 
-| Signal                | Command           | ✅ MANA                             | ❌ NOT MANA (ConnectX)        |
-| --------------------- | ----------------- | ----------------------------------- | ----------------------------- |
-| PCI device (Linux)    | `lspci`           | `Microsoft Corporation Device 00ba` | `Mellanox … ConnectX-5 VF`    |
-| **VF driver (Linux)** | `ethtool -i <vf>` | **`mana`**                          | **`mlx5_core`**               |
-| VF interface name     | `ip -br link`     | typically **`ens1`** (SLAVE)        | typically `enP*` (SLAVE)      |
-| Primary iface driver  | `ethtool -i eth0` | `hv_netvsc`                         | `hv_netvsc` (same)            |
-| VF traffic counters   | `ethtool -S eth0` | `vf_*` increment                    | `vf_*` increment (same names) |
-| Windows adapter       | `Get-NetAdapter`  | `Microsoft Azure Network Adapter`   | `Mellanox …`                  |
-| Windows PCI           | `Get-PnpDevice`   | `PCI\VEN_1414&DEV_00BA&`            | `VEN_15B3` (Mellanox)         |
+| Signal                | Command           | ✅ MANA                             | ❌ NOT MANA (ConnectX)           |
+| --------------------- | ----------------- | ----------------------------------- | -------------------------------- |
+| PCI device (Linux)    | `lspci`           | `Microsoft Corporation Device 00ba` | `Mellanox … ConnectX-5 VF`       |
+| **VF driver (Linux)** | `ethtool -i <vf>` | **`mana`**                          | **`mlx5_core`**                  |
+| VF interface name     | `ip -br link`     | typically **`ens1`**                | typically `enP*`                 |
+| VF relation           | `ip -o link show` | `CHILD` or legacy NetVSC `SLAVE`    | `CHILD` or legacy NetVSC `SLAVE` |
+| Primary iface driver  | `ethtool -i eth0` | `hv_netvsc`                         | `hv_netvsc` (same)               |
+| VF traffic counters   | `ethtool -S eth0` | `vf_*` increment                    | `vf_*` increment (same names)    |
+| Windows adapter       | `Get-NetAdapter`  | `Microsoft Azure Network Adapter`   | `Mellanox …`                     |
+| Windows PCI           | `Get-PnpDevice`   | `PCI\VEN_1414&DEV_00BA&`            | `VEN_15B3` (Mellanox)            |
 
-**Third state:** a VM on MANA hardware whose OS lacks the MANA driver shows `00ba` in `lspci` but exposes **no accelerated VF** (only `hv_netvsc`) → traffic falls back to NetVSC with ConnectX-class performance. This is the degradation case the `LegacyVMNVA` exception addresses.
+**Third state:** a VM on MANA hardware whose OS lacks MANA support shows `00ba`, but the MANA driver exposes
+no network interface; the VF might still be visible. Traffic falls back to NetVSC. Microsoft expects broadly
+comparable ConnectX-class performance, but high concurrent-connection workloads can degrade. `LegacyVMNVA`
+applies only to eligible AN-enabled NVAs when the vendor directs an opt-out or degradation is observed.
 
 ---
 
 ## Reference results (from a real run)
 
-Full anonymized command/query outputs (Linux, Windows, traffic, ARG, policy) are in [sample-outputs.md](./sample-outputs.md). Two proofs specific to this lab:
+Anonymized captured and expected-output examples are in [sample-outputs.md](./sample-outputs.md). Two Linux evidence points specific to this lab:
 
-- **Traffic proof (MANA VM):** flood ping moved VF counters by ~5,000 packets each way (`vf_rx_packets` / `vf_tx_packets`), confirming traffic on the MANA VF.
-- **Re-roll proof:** `deallocate → start` changes the VF PCI address and resets counters — confirming Azure re-placed the VM. In testing, the `D4s_v5` VMs stayed on ConnectX across re-rolls; the `D4ds_v6` VM stayed on MANA across restarts.
+- **Traffic evidence (MANA VM):** flood ping moved VF counters by ~5,000 packets each way (`vf_rx_packets` / `vf_tx_packets`). The bound `mana` driver and MANA PCI device attributed that accelerated VF to MANA.
+- **Allocation observation:** after `deallocate → start`, this lab observed a different guest VF PCI address and reset counters. Those signals show guest device re-enumeration and fresh runtime state; they do not identify the physical host or prove a host change. Driver and device-family checks still showed ConnectX on `D4s_v5` and MANA on `D4ds_v6`.
 
 ---
 
 ## Findings & gotchas
 
-| #   | Issue                                                   | Guidance                                                                                                                        |
-| --- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **MANA placement cannot be forced**                     | Azure controls it. Prefer a **v6** size to raise MANA odds; re-roll via deallocate→start; never claim a command "enables MANA". |
-| 2   | **VM size drives MANA likelihood**                      | `D4s_v5` never got MANA even after re-rolls; `D4ds_v6` got MANA on first boot.                                                  |
-| 3   | **MANA VF is named `ens1`, not `enP*`**                 | Match the bonded **SLAVE** interface generically (any name). `scripts/detect-mana.sh` does this.                                |
-| 4   | **`ethtool -i <vf>` is the definitive check**           | `mana` = MANA, `mlx5_core` = ConnectX. `lspci 00ba` corroborates.                                                               |
-| 5   | **VF counter names are identical on ConnectX and MANA** | `vf_*` counters prove the accelerated data path, not MANA specifically — confirm with driver/PCI.                               |
-| 6   | **Built-in policy only tags Marketplace NVA images**    | It won't auto-tag a plain VM. Apply the tag directly for test/non-Marketplace VMs; coordinate with vendor/MSP otherwise.        |
-| 7   | **No public IP / inbound SSH needed**                   | Use `az vm run-command invoke ... --command-id RunShellScript` to run scripts in-guest.                                         |
-| 8   | **Run in the correct subscription**                     | `az account show` before running; `az account set --subscription <id>` to switch.                                               |
+| #   | Issue                                                   | Guidance                                                                                                                      |
+| --- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Existing-series placement cannot be forced**          | Eligible existing series may use Mellanox or MANA. Reallocate and detect; never claim the command "enables MANA."             |
+| 2   | **Use documented series behavior, not inferred odds**   | Intel v6 or later is MANA-based. The observed `D4s_v5`/`D4ds_v6` contrast is one lab result, not a probability model.         |
+| 3   | **VF names are not stable identifiers**                 | Discover every `CHILD`, plus legacy `SLAVE` only when its master uses `hv_netvsc`; never hardcode `ens1` or `enP*`.           |
+| 4   | **`ethtool -i <vf>` directly identifies the driver**    | `mana` = MANA, `mlx5_core` = ConnectX. `lspci 00ba` corroborates.                                                             |
+| 5   | **VF counter names are identical on ConnectX and MANA** | Increasing `vf_*` counters show use of the accelerated data path, not MANA specifically; confirm with driver/PCI.             |
+| 6   | **Policy targets specific Marketplace products**        | A publisher hit alone is insufficient. Verify the live product match; coordinate non-Marketplace tagging with the vendor/MSP. |
+| 7   | **No public IP / inbound SSH needed**                   | Use `az vm run-command invoke ... --command-id RunShellScript` to run scripts in-guest.                                       |
+| 8   | **Run in the correct subscription**                     | `az account show` before running; `az account set --subscription <id>` to switch.                                             |
 
 ### One-line summary
 
-> Same OS/kernel, same region: an older eligible size (`D4s_v5`) landed on **ConnectX-5** (`mlx5_core`), while a MANA-optimized `D4ds_v6` landed on **MANA** (`00ba`, driver `mana`). Definitive check = **`ethtool -i <vf>`**. The `LegacyVMNVA` tag + reapply keeps an NVA off MANA until migration. Placement is Azure-controlled; newer (v6) sizes are far more likely to get MANA.
+> In this lab, with the same OS/kernel and region, `D4s_v5` used **ConnectX-5** (`mlx5_core`) and `D4ds_v6` used **MANA** (`00ba`, driver `mana`). Treat the v5 result as an observation; eligible existing series may use either NIC family. Microsoft documents Intel v6 or later as MANA-based. Confirm the actual VF driver after allocation.

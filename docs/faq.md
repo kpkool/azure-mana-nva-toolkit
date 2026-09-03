@@ -2,7 +2,7 @@
 
 Common questions about the Microsoft Azure Network Adapter (MANA) expansion to existing VM series and the `LegacyVMNVA` opt-out. Every answer is grounded in **public Microsoft Learn** (links at the end). Confirm vendor-specific details with your NVA vendor and Microsoft Support.
 
-> **Verified against Microsoft Learn:** 2026-08-20 (opt-out page updated 2026-08-06; existing-sizes page updated 2026-08-11). Re-verify dates before relying on them.
+> **Verified against Microsoft Learn:** 2026-09-03 (opt-out page updated 2026-08-06; existing-sizes page updated 2026-08-11). Re-verify dates before relying on them.
 
 ---
 
@@ -27,15 +27,15 @@ No. A VM stays on its current hardware until an action re-runs allocation — a 
 **None.** Per Microsoft Learn: _"If Accelerated Networking is not enabled on your VM, no action is required. While your VM may still be placed on MANA-capable hardware, your workload will continue to run as expected without changes."_
 
 - AN is a **per-NIC** setting, so **yes, an NVA can have AN disabled** on some or all NICs (though NVAs usually enable AN on data-path NICs for throughput).
-- With AN disabled there is **no SR-IOV Virtual Function and no MANA driver dependency**, so MANA placement is a non-event for that NIC/VM.
+- The Azure NIC resource's AN setting is the control-plane source of truth. Guest PCI/VF visibility does not override an AN-disabled classification.
 - **Process:** (1) confirm AN status per NIC (ARG inventory / portal), (2) if disabled → **no action**, (3) optionally still modernize the OS/VM series for the best networking experience, but it is **not required** for MANA.
 - You do **not** need the `LegacyVMNVA` tag on AN-disabled VMs. The tag is only for **AN-based NVAs** that observe degradation on MANA hardware.
 
-> **Forward-looking (opt-in):** "No action required" means no _risk_ action — it does **not** mean ignore these VMs forever. AN-off / general workloads are the natural **candidates to adopt MANA later** for its throughput, reliability, and resiliency gains: enable Accelerated Networking on a MANA-ready OS and (ideally) a newer/MANA-optimized series. Keep them in your periodic re-scan as an **optimization** decision, separate from the NVA-risk decision. (AKS is handled automatically by Azure — no action either way.)
+> **Forward-looking (opt-in):** "No action required" means no _risk_ action — it does **not** mean ignore these VMs forever. AN-off / general workloads are the natural **candidates to adopt MANA later** for its throughput, reliability, and resiliency gains: enable Accelerated Networking on a MANA-ready OS and (ideally) a newer/MANA-optimized series. Keep them in your periodic re-scan as an **optimization** decision, separate from the NVA-risk decision. Microsoft states that AKS instances are not impacted and continue to perform as expected on MANA hardware.
 
 ## When the `LegacyVMNVA` tag is no longer honored, what happens to AN-disabled devices?
 
-**Nothing changes for them.** The tag is honored until **May 31, 2027**; after that, all MANA-eligible series may be placed on MANA-capable hardware. AN-disabled workloads were never at risk (no AN = no VF/driver dependency), so they **continue to run as expected** before and after that date. Only **AN-enabled NVAs on unsupported OS/kernel** face placement risk after the tag stops being honored.
+No MANA action is required for an AN-disabled VM. The built-in policy can still match because Microsoft states that AN status does not affect policy application, but the exception is not needed for that workload. After **May 31, 2027**, the tag is no longer honored for eligible VMs. AN-enabled NVAs still need supported-configuration, vendor, and workload validation; risk is not limited to a missing OS driver.
 
 ---
 
@@ -53,7 +53,7 @@ Until **May 31, 2027**. If applied **and enabled** before that date, the VM avoi
 
 ## What about custom kernels or non-Marketplace NVAs?
 
-Higher risk — Azure can't automatically detect them, and the built-in policy only auto-tags **listed Marketplace publishers**. Work directly with your vendor to validate MANA support, and if needed apply the `LegacyVMNVA` tag through your own tooling (tag + `reapply`), then redeploy per your change process.
+Higher risk — Azure can't automatically classify them, and the built-in policy matches only **specific Marketplace publisher/product combinations**. Work directly with your vendor to validate MANA support, and if needed apply the `LegacyVMNVA` tag through your own tooling (tag + `reapply`), then redeploy per your change process.
 
 ## What role do On-Demand Capacity Reservations (ODCR) play?
 
@@ -61,7 +61,7 @@ If you apply `LegacyVMNVA` to VMs backed by an ODCR, the available placement poo
 
 ## Are v6/v7 sizes impacted?
 
-Intel **v6 and later** always run on MANA-capable hardware. They are not affected as long as the OS supports MANA. (Resizing an older Intel VM to v6+ satisfies the hardware requirement, but the guest OS must still support MANA.)
+Intel **v6 and later** always run on MANA-capable hardware. Resizing an older Intel VM to v6+ satisfies the hardware requirement only; the guest OS must still support MANA, and NVA vendor/workload validation still applies.
 
 ## Are AKS or VNet encryption impacted?
 
@@ -81,8 +81,8 @@ Networking falls back to the **NetVSC** adapter. The MANA VF may be visible but 
 1. **Inventory** NVAs and AN workloads at scale ([inventory-arg.md](./inventory-arg.md)).
 2. **Validate** OS/kernel + on-host MANA state ([verify-mana-nic.md](./verify-mana-nic.md)).
 3. **Engage your NVA vendor** for MANA support/upgrade guidance (supported VM series, appliance OS/version, drivers).
-4. **Apply the opt-out** only where needed (AN-based NVAs not yet MANA-compatible).
-5. **Plan migration** to a MANA-optimized, non-retiring series before **May 31, 2027**; secure capacity (e.g., ODCR) for constrained regions before redeploying.
+4. **Apply the opt-out** only for an AN-based NVA that observes degradation or whose provider directs the exception.
+5. **Plan migration** to a MANA-optimized, non-retiring series before **May 31, 2027**, including capacity planning for the approved target.
 
 ---
 

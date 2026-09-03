@@ -1,11 +1,11 @@
 # Implementing the `LegacyVMNVA` Temporary Exception (az CLI)
 
 > All operations below are taken from the official NVA opt-out page. See [references.md](./references.md).
-> **Verified:** 2026-08-20.
+> **Verified:** 2026-09-03.
 
 **Order matters:** Assign policy → Remediate (adds tag) → **Reapply (enables tag)** → Verify. Applying the tag **alone is not sufficient** for existing resources.
 
-> **Use proactively as a temporary safeguard.** If an NVA (on an eligible size, with Accelerated Networking) is **not confirmed MANA-compatible**, apply the opt-out **before** it can land on MANA hardware — don't wait for a performance hit, which can be severe and cause an outage. It's a **bridge** while you validate compatibility and migrate, **not the end state**. See [When to use / When NOT to use](#when-to-use--when-not-to-use).
+> **Use only when needed.** Microsoft says the exception is needed for AN workloads that observe degradation on MANA-capable hardware. A provider may also direct it as part of the provider's migration plan. Compatibility uncertainty alone is a review and pilot trigger, not proof that the tag is required.
 
 > To validate the opt-out end-to-end with before/after NIC + traffic evidence, use [evidence-lab.md](./evidence-lab.md).
 
@@ -15,19 +15,20 @@
 
 **Use `LegacyVMNVA` when:**
 
-- An NVA on an eligible VM series with **Accelerated Networking** is **not confirmed MANA-compatible** (vendor hasn't confirmed your VM size + OS + software version). Apply **proactively / ASAP** to keep it off MANA hardware.
-- You need a **temporary bridge** during migration to a MANA-compatible configuration.
-- The NVA is a **Marketplace** image (built-in policy auto-tags by publisher/product) **or** a **BYO/non-Marketplace** image (apply the tag via your own tooling + reapply).
+- An NVA with **Accelerated Networking** observes performance degradation on MANA-capable hardware.
+- The NVA or managed-service provider directs use of the exception while you migrate.
+- You need a **temporary bridge** after one of those triggers. Marketplace products can use the built-in policy; BYO/non-Marketplace deployments follow the provider's tagging mechanism.
 
 **Do NOT use `LegacyVMNVA` when:**
 
 - **Accelerated Networking is disabled** → no MANA action needed.
-- The workload is **already MANA-compatible** (vendor-confirmed, or in-guest shows the `mana` driver working) → let it use MANA; don't tag.
+- Compatibility is merely **unknown** → complete the supported-configuration review and pilot first; guest driver presence alone is not compatibility proof.
+- The workload is **MANA-compatible** based on a supported configuration/vendor confirmation and workload validation.
 - **General (non-NVA) workloads** → don't apply broadly; it forgoes MANA benefits and (with ODCR) voids the capacity-reservation SLA.
 - **AKS node pools** → not impacted by MANA; don't tag.
 - **After May 31, 2027** → the tag is no longer honored.
 
-> **Why (business):** applying the tag proactively prevents a MANA placement change from disrupting an incompatible NVA (throughput/connectivity loss). **How:** policy → remediate → reapply (below). Remove it once the NVA is MANA-compatible.
+> **Why (business):** the tag temporarily avoids MANA placement for a degraded or provider-identified NVA. **How:** policy or provider mechanism → tag → reapply (below). Remove it after migration and validation.
 
 ---
 
@@ -82,9 +83,9 @@ az role assignment create \
 
 > Confirm the exact role(s) for the version you assigned:
 > `az policy definition show --name e87a87f5-e6dd-4919-be21-abb0a4ea4630 --query policyRule.then.details.roleDefinitionIds -o tsv`
-> Allow ~30–60s for the role assignment to propagate before running remediation.
+> Confirm the role assignment exists before remediation; propagation timing varies.
 
-> **New deployments** within the assigned scope get the `LegacyVMNVA` tag **automatically** — Steps 2–3 are only for **existing** resources.
+> **New deployments** within the assigned scope automatically have the `LegacyVMNVA` tag enabled — Steps 2–3 are only for **existing** resources.
 
 ---
 
@@ -102,7 +103,7 @@ az policy remediation create \
 
 See [Remediate non-compliant resources](https://learn.microsoft.com/en-us/azure/governance/policy/how-to/remediate-resources). This covers individual VMs and VM Scale Set scenarios.
 
-> **Scoping caveat:** the built-in policy applies the tag only to **Marketplace NVA** publisher/product images (its display name is _"Configure Marketplace Network Virtual Appliances (NVAs) to add a MANA support tag"_). It will not auto-tag a non-NVA image. For NVAs acquired outside Marketplace or via a managed service, apply the tag through your own tooling / the vendor's process.
+> **Scoping caveat:** the built-in policy applies the tag only to its **specific Marketplace NVA publisher/product combinations** (its display name is _"Configure Marketplace Network Virtual Appliances (NVAs) to add a MANA support tag"_). A publisher match alone does not prove applicability. For NVAs acquired outside Marketplace or via a managed service, apply the tag through your own tooling / the vendor's process.
 
 ---
 
@@ -145,13 +146,17 @@ When your NVA is MANA-compatible:
 
 1. **Delete the policy assignment:**
    ```bash
-   az policy assignment delete --name "LegacyVMNVA-optout" --scope "/subscriptions/<subscription-id>"
+   az policy assignment delete --name "LegacyVMNVA-optout" --scope "$SCOPE"
    ```
    For gradual rollback, update the policy **resource selector** to incrementally remove regions.
 2. **Remove the tag** from existing VMs (if it persists) and **redeploy** the VMs:
    ```bash
-   az resource tag --ids <vm-resource-id> --tags   # re-set tags without LegacyVMNVA
+   az tag update \
+    --resource-id <vm-resource-id> \
+    --operation Delete \
+    --tags LegacyVMNVA
    ```
+   This deletes only `LegacyVMNVA`; all unrelated tags remain unchanged. Repeat for each tagged VM or VMSS in `$SCOPE`.
 3. For **ODCR** VMs, removing the tag + ensuring MANA compatibility **restores ODCR SLA eligibility**.
 
 > **After May 31, 2027**, the tag is no longer honored and MANA-eligible series may be placed on MANA-capable hardware ([Microsoft](https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-mana-network-virtual-appliance-opt-out)). It's a bridge _"while you complete your migration"_ — make NVAs MANA-compatible before this date, then remove the policy assignment.

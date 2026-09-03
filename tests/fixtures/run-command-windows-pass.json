@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "RAW_GUEST_SECRET_SHOULD_NOT_PERSIST\nMANA_RESULT_JSON={\"schemaVersion\":\"1.1\",\"os\":\"Windows\",\"guestEvidenceStatus\":\"PASS\",\"reasonCode\":\"MANA_ADAPTER_PRESENT\",\"guestEvidenceScope\":\"VM\",\"hardwareState\":\"MANA\",\"guestAnState\":\"yes\",\"manaAdapterPresent\":true,\"datapathState\":\"CONFIRMED\",\"datapathScope\":\"VM_SHARED_MANA_VF\",\"tagState\":\"absent\",\"customizationRisk\":\"NONE_DETECTED\",\"customizationSignals\":[]}\n"
+    }
+  ]
+}

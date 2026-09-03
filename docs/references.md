@@ -1,6 +1,8 @@
 # Public Microsoft References — MANA / NVA / LegacyVMNVA
 
-All references are public Microsoft Learn or Microsoft Tech Community pages. **Verified:** 2026-08-20.
+<!-- markdownlint-disable MD034 -->
+
+All references are public Microsoft Learn or Microsoft Tech Community pages. **Verified:** 2026-09-03.
 
 ## Core MANA / NVA pages
 
@@ -43,36 +45,46 @@ All references are public Microsoft Learn or Microsoft Tech Community pages. **V
 
 ## VM retirement (for `*` series)
 
-| Reference                               | URL                                                                                                              |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Retired VM sizes list                   | https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/retirement/retired-sizes-list                     |
-| D/Ds/Dv2/Dsv2/Ls series migration guide | https://learn.microsoft.com/en-us/azure/virtual-machines/migration/sizes/d-ds-dv2-dsv2-ls-series-migration-guide |
+| Reference                               | URL                                                                                                                         |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Retired VM sizes list                   | https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retired-sizes-list                                 |
+| D/Ds/Dv2/Dsv2/Ls series migration guide | https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/lifecycle/retirement/d-ds-dv2-dsv2-ls-series-migration-guide |
 
 ## Tooling & commands used by this toolkit
 
-| Tool / command                                       | URL                                                                                     |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Azure Resource Graph — overview                      | https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview              |
-| Azure Resource Graph — starter query samples         | https://learn.microsoft.com/en-us/azure/governance/resource-graph/samples/starter       |
-| `az graph query` (CLI reference)                     | https://learn.microsoft.com/en-us/cli/azure/graph                                       |
-| Run scripts in a Linux VM with `az vm run-command`   | https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command-managed      |
-| Run scripts in a Windows VM with `az vm run-command` | https://learn.microsoft.com/en-us/azure/virtual-machines/windows/run-command-managed    |
-| Accelerated Networking — overview                    | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-overview |
-| Auto-shutdown a VM (schedule)                        | https://learn.microsoft.com/en-us/azure/virtual-machines/auto-shutdown-vm               |
+| Tool / command                                       | URL                                                                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Azure Resource Graph — overview                      | https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview                |
+| Azure Resource Graph — starter query samples         | https://learn.microsoft.com/en-us/azure/governance/resource-graph/samples/starter         |
+| `az graph query` (CLI reference)                     | https://learn.microsoft.com/en-us/cli/azure/graph                                         |
+| Azure Resource Graph pagination                      | https://learn.microsoft.com/en-us/azure/governance/resource-graph/concepts/paging-results |
+| Action vs. managed Run Command limits                | https://learn.microsoft.com/en-us/azure/virtual-machines/run-command-overview             |
+| Run scripts in a Linux VM with `az vm run-command`   | https://learn.microsoft.com/en-us/azure/virtual-machines/linux/run-command-managed        |
+| Run scripts in a Windows VM with `az vm run-command` | https://learn.microsoft.com/en-us/azure/virtual-machines/windows/run-command-managed      |
+| Accelerated Networking — overview                    | https://learn.microsoft.com/en-us/azure/virtual-network/accelerated-networking-overview   |
+| Auto-shutdown a VM (schedule)                        | https://learn.microsoft.com/en-us/azure/virtual-machines/auto-shutdown-vm                 |
+
+## VM-series migration (separate from MANA assessment)
+
+| Reference                             | URL                                                                                                    |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Wave-based v6/v7 migration runbook    | https://learn.microsoft.com/en-us/azure/virtual-machines/migration/sizes/sizes-v6-v7-migration-migrate |
+| SCSI-to-NVMe readiness and conversion | https://learn.microsoft.com/en-us/azure/virtual-machines/nvme-linux                                    |
+| In-place SCSI-to-NVMe limitations     | https://learn.microsoft.com/en-us/azure/virtual-machines/migration/sizes/scsi-to-nvme-migration        |
 
 ---
 
 ## Verified key values (quick audit)
 
-| Item                                                       | Value                                            | Primary source                     |
-| ---------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
-| Cobalt 100 v6 & Intel v5 earliest placement (Public cloud) | **May 26, 2026**                                 | NVA opt-out / existing-sizes pages |
-| All other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, …)     | **Timeline under review** (no published date)    | NVA opt-out / existing-sizes pages |
-| Tag honored until                                          | **May 31, 2027**                                 | NVA opt-out page                   |
-| Built-in policy definition ID                              | `e87a87f5-e6dd-4919-be21-abb0a4ea4630` (v1.3.0)  | NVA opt-out page                   |
-| Tag name                                                   | `LegacyVMNVA`                                    | NVA opt-out page                   |
-| VMSS Uniform reapply API version                           | `2025-11-01`                                     | NVA opt-out page                   |
-| Linux MANA PCI device                                      | `Microsoft Corporation Device 00ba` (`lspci`)    | Linux MANA page                    |
-| Linux MANA VF driver                                       | `mana` (`ethtool -i <vf>`)                       | Linux MANA page                    |
-| Windows MANA PCI ID                                        | `PCI\VEN_1414&DEV_00BA&`                         | Windows MANA page                  |
-| Linux MANA kernel (first upstream)                         | 5.15+ (6.2 for IB/RDMA & DPDK; DPDK needs 6.14+) | Linux MANA / overview              |
+| Item                                                       | Value                                                                                                    | Primary source                     |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| Cobalt 100 v6 & Intel v5 earliest placement (Public cloud) | **May 26, 2026**                                                                                         | NVA opt-out / existing-sizes pages |
+| All other eligible series (Dsv2, Dv2, Dsv3/4, Bsv2, …)     | **Timeline under review** (no published date)                                                            | NVA opt-out / existing-sizes pages |
+| Tag honored until                                          | **May 31, 2027**                                                                                         | NVA opt-out page                   |
+| Built-in policy definition ID                              | `e87a87f5-e6dd-4919-be21-abb0a4ea4630` (v1.3.0)                                                          | NVA opt-out page                   |
+| Tag name                                                   | `LegacyVMNVA`                                                                                            | NVA opt-out page                   |
+| VMSS Uniform reapply API version                           | `2025-11-01`                                                                                             | NVA opt-out page                   |
+| Linux MANA PCI device                                      | `Microsoft Corporation Device 00ba` (`lspci`)                                                            | Linux MANA page                    |
+| Linux MANA VF driver                                       | `mana` (`ethtool -i <vf>`)                                                                               | Linux MANA page                    |
+| Windows MANA PCI ID                                        | `PCI\VEN_1414&DEV_00BA&`                                                                                 | Windows MANA page                  |
+| Linux MANA kernel milestones                               | Ethernet upstream in 5.15; 6.2 added feature support; running DPDK needs 6.14+ or 6.14+ driver backports | Linux MANA / DPDK guidance         |

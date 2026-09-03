@@ -2,12 +2,12 @@
 // Azure Resource Graph -- Vendor / Publisher / Plan / OS discovery (safety net)
 // =============================================================================
 // Purpose: list EVERY distinct vendor + Marketplace plan + OS across all accessible VMs and VMSS,
-// with VM counts and a policy-scope flag -- so NO vendor is silently skipped by the classifier.
+// with VM counts and a publisher-list hint -- so NO vendor is silently skipped by the classifier.
 // Use this alongside inventory-nva-vms.kql / inventory-nva-vmss.kql: the inventory queries CLASSIFY,
 // this query ENUMERATES so a human can eyeball unknown / unlisted / custom vendors and decide.
 //
-// One row per distinct (Vendor, PlanPublisher, PlanProduct, OSType, ImageSource, PolicyScoped),
-// with VMCount and AN-enabled count.
+// One row per distinct (Vendor, PlanPublisher, PlanProduct, OSType, ImageSource, PublisherListed),
+// with VMCount and ResourceTypes.
 //
 // Runs in Azure Resource Graph Explorer (portal) or via CLI:
 //   az graph query -q "@scripts/discover-vendors.kql" --first 1000 -o table
@@ -18,14 +18,15 @@
 //   PlanPublisher / PlanProduct -- Marketplace fields the LegacyVMNVA policy matches on.
 //   OSType, OSVersion -- guest OS and image offer/sku.
 //   ImageSource   -- Marketplace | Gallery/Custom | Platform | Custom/VHD.
-//   PolicyScoped  -- Yes if the vendor is in the built-in policy publisher allow-list (auto-tag).
-//   FirstPartyOS  -- Yes if the vendor is a recognized first-party OS publisher (Microsoft / Canonical /
-//                    RedHat / SUSE / Debian / Oracle / etc.). FirstPartyOS=No => a THIRD-PARTY vendor to review.
+//   PublisherListed -- Yes if the vendor is in the built-in policy publisher list. This does not
+//                    prove exact policy applicability; the policy also matches Marketplace product IDs.
+//   RecognizedOSPublisher -- Yes if the vendor is in the conservative OS publisher allow-list
+//                    (Microsoft / Canonical / RedHat / SUSE / Debian / Oracle / etc.). This is a routing
+//                    aid, not a claim of Microsoft ownership or MANA support.
 //   VMCount       -- how many VM/VMSS resources share this vendor/plan/OS combination.
 //   ResourceTypes -- VM and/or VMSS.
-// Review every row where FirstPartyOS=No (all third parties) OR PolicyScoped=No -- those are the potential
-// blind spots (NVAs, unlisted Marketplace, gallery/custom/VHD, unknown vendors). Cross-check the vendor's
-// MANA-compatibility matrix.
+// Review every row where RecognizedOSPublisher=No. PublisherListed distinguishes a known NVA publisher hint;
+// PublisherListed=No never clears a non-OS publisher. Cross-check the vendor's MANA-compatibility matrix.
 // =============================================================================
 
 resources
@@ -59,15 +60,15 @@ resources
     'sophos','technicheltd1606969724100','trendmicro','twistlock','velocloud','versanetworks',
     'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
 | extend _pubLower = tolower(trim(' ', Vendor))
-| extend PolicyScoped = iff(
+| extend PublisherListed = iff(
     set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler',
     "Yes", "No")
-// First-party / OS publishers -- everything else (FirstPartyOS=No) is a third-party vendor worth reviewing.
-| extend _osPublishers = dynamic([
+// Recognized OS publisher allow-list. Everything outside it remains a review candidate.
+| extend _recognizedOSPublishers = dynamic([
     'canonical','redhat','suse','debian','credativ','oracle','openlogic',
     'almalinux','resf','rockylinux','kali-linux'])
-| extend FirstPartyOS = iff(set_has_element(_osPublishers, _pubLower) or _pubLower startswith 'microsoft', "Yes", "No")
+| extend RecognizedOSPublisher = iff(set_has_element(_recognizedOSPublishers, _pubLower) or _pubLower startswith 'microsoft', "Yes", "No")
 | summarize VMCount = count(), ResourceTypes = make_set(iff(isVMSS,'VMSS','VM'))
-    by Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PolicyScoped, FirstPartyOS
-| project Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PolicyScoped, FirstPartyOS, VMCount, ResourceTypes
-| order by FirstPartyOS asc, PolicyScoped asc, VMCount desc, Vendor asc
+    by Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PublisherListed, RecognizedOSPublisher
+| project Vendor, PlanPublisher, PlanProduct, OSType, OSVersion, ImageSource, PublisherListed, RecognizedOSPublisher, VMCount, ResourceTypes
+| order by RecognizedOSPublisher asc, PublisherListed asc, VMCount desc, Vendor asc

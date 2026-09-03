@@ -8,7 +8,7 @@ Before checking individual VMs, use **Azure Resource Graph (ARG)** to list every
 > - ❌ It **cannot** tell you whether a VM is currently on **MANA hardware** — that is host placement, only visible **in-guest** (confirm with [verify-mana-nic.md](./verify-mana-nic.md) / `scripts/detect-mana.sh`).
 > - ❌ A present `LegacyVMNVA` tag does **not** prove it was **enabled** — enabling requires a **reapply** operation (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md)).
 
-## Query (VMs)
+## Query (VM summary)
 
 Use [`../scripts/inventory-nva-vms.kql`](../scripts/inventory-nva-vms.kql). Runs in **Azure Resource Graph Explorer** (portal) or via CLI:
 
@@ -21,22 +21,43 @@ az graph query -q "@scripts/inventory-nva-vms.kql" --first 1000 \
 
 Columns: **Sub + RG + VM** (the identity you feed straight into Step 2 per VM), **Vendor** (Marketplace plan publisher first, else image publisher), **NVAClass** (6-state — see below), **ImageSource** (`Marketplace` / `Gallery/Custom` / `Platform` / `Custom/VHD`), **OS + OSVersion**, **AN** (per-NIC accurate), **LegacyVMNVATag**, and **Assessment**. The full column list (incl. `PlanPublisher`, `PlanProduct`, `Offer`, `Sku`) is documented in the KQL header — widen the `--query` projection to show more.
 
-> **Enumerate every vendor (safety net):** [`../scripts/discover-vendors.kql`](../scripts/discover-vendors.kql) lists **all** distinct Vendor / PlanPublisher / PlanProduct / OS / ImageSource across VMs + VMSS with counts, a `PolicyScoped` flag, and a **`FirstPartyOS`** flag — so no vendor is silently skipped. Review every row where **`FirstPartyOS=No`** (all third parties) or `PolicyScoped=No`.
+## Query (per NIC)
 
-## Why this differs from the common one-liner (multiple-NIC fix)
+Use [`../scripts/inventory-mana-nics.kql`](../scripts/inventory-mana-nics.kql) when each NIC must retain its own
+identity and AN state:
 
-A frequently shared version joins VMs directly to **individual NICs**:
+```bash
+az graph query -q "@scripts/inventory-mana-nics.kql" --subscriptions <subscription-id> --first 1000 \
+  --query "data[].{Sub:subscriptionId,RG:resourceGroup,VM:VMName,NIC:NICName,Primary:NICPrimary,AN:AcceleratedNetworking,Exposure:ExposureStatus,Readiness:ReadinessStatus,Confidence:Confidence,Reason:ReasonCode,Action:RequiredAction}" \
+  -o table
+```
+
+The query intentionally separates `ExposureStatus` from `ReadinessStatus`. ARG can prove whether AN is enabled
+on an Azure NIC, but cannot prove current MANA host placement, guest-driver health, custom-image safety, or NVA
+vendor support. AN-enabled NICs therefore start as `POTENTIAL` / `UNKNOWN`.
+
+For complete pagination and durable JSON/CSV output, use
+[`../scripts/invoke-mana-fleet-assessment.ps1`](../scripts/invoke-mana-fleet-assessment.ps1). Manual
+`--first 1000` output is capped at 1,000 rows.
+
+> **Enumerate every vendor (safety net):** [`../scripts/discover-vendors.kql`](../scripts/discover-vendors.kql) lists **all** distinct Vendor / PlanPublisher / PlanProduct / OS / ImageSource combinations with counts, a `PublisherListed` hint, and a `RecognizedOSPublisher` routing flag. Review every row where `RecognizedOSPublisher=No`. `PublisherListed=Yes` does not prove that the policy matches the product, and `PublisherListed=No` does not clear an unrecognized publisher.
+
+## Why the VM summary aggregates first
+
+A direct VM-to-NIC join intentionally produces a per-NIC report, but it is unsafe when the required output is
+one row per VM:
 
 ```kusto
 | join kind=leftouter ( Resources | where type =~ 'microsoft.network/networkinterfaces' ... ) on vmId
 ```
 
-That produces **one row per NIC**, so:
+Without aggregation:
 
 - A **multi-NIC VM appears multiple times** (double-counted).
 - If NICs differ (one AN-enabled, one not), the VM shows **conflicting rows** with no clear status.
 
-This toolkit's query **summarizes NICs per VM first**, then joins — so each VM is **exactly one row** and mixed AN is surfaced explicitly:
+The VM-summary query **summarizes NICs per VM first**, then joins, so each VM is exactly one row and mixed AN is
+surfaced explicitly. The dedicated per-NIC query retains those rows by design.
 
 | NIC situation   | Reported `AcceleratedNetworking` |
 | --------------- | -------------------------------- |
@@ -50,22 +71,22 @@ This toolkit's query **summarizes NICs per VM first**, then joins — so each VM
 ## Interpreting results
 
 - **Vendor** = the **Marketplace plan publisher** if present (this is what the built-in `LegacyVMNVA` policy matches), else the image publisher; `unknown/custom` for gallery/VHD images.
-- **NVAClass** — 6-state so nothing is silently skipped: **`Policy-scoped NVA (auto-tag)`** (vendor in the policy allow-list → policy can auto-tag, e.g. `paloaltonetworks`), **`Marketplace - not in policy list (review)`** (a Marketplace NVA the policy will NOT tag — tag manually), **`Possible NVA - keyword hint (review)`** (name/product matches an NVA keyword), **`Custom/unknown image (review)`** (gallery/VHD — unidentifiable from metadata; check on host/CMDB), **`Third-party publisher (review)`** (a platform image from a publisher that is **not** a recognized first-party OS vendor — the resilience backstop that catches niche appliances), **`General (platform OS)`** (a normal first-party OS image — typically no action).
-- **ImageSource** → `Marketplace` (policy can auto-tag in-scope publishers), or `Gallery/Custom` / `Platform` / `Custom/VHD` (the policy will **not** auto-tag — tag manually if it's an NVA).
+- **NVAClass** — 6-state so nothing is silently skipped: **`Publisher-listed NVA (product match unverified)`** (publisher appears in the policy snapshot; verify the exact `PlanProduct` against the live policy), **`Marketplace - not in policy list (review)`**, **`Possible NVA - keyword hint (review)`**, **`Custom/unknown image (review)`**, **`Third-party publisher (review)`**, or **`General (platform OS)`**. Every class except `General` remains an explicit review state.
+- **ImageSource** → `Marketplace`, `Gallery/Custom`, `Platform`, or `Custom/VHD`. This is image provenance, not proof of policy applicability.
 - **AN = Disabled** → no MANA action needed for that VM.
 - **AN = Enabled / Partial** on a MANA-eligible size → verify on the host with `scripts/detect-mana.sh` / `validate-nva-mana.*`.
 - **LegacyVMNVATag = True** → opt-out tag present; confirm it was **enabled via reapply**, then plan migration.
-- **Assessment** = triage verdict (control-plane only): `No action - AN disabled`, `NVA (policy-scoped) - validate on host`, `Marketplace NVA NOT in policy list - tag MANUALLY if not MANA-ready`, `Third-party publisher - verify on host; tag manually if it is an NVA`, `Unknown/custom image - tag manually if it is an NVA`, `AN general VM - likely no action`, `Opt-out tag present - confirm reapply`, or `AKS-managed - not impacted`.
+- **Assessment** = triage verdict (control-plane only): `No action - AN disabled`, `Publisher-listed NVA - verify exact policy product match and vendor support`, `Marketplace review - confirm workload and vendor support`, `Third-party publisher - classify workload and confirm vendor support`, `Unknown/custom image - inspect image and workload assumptions`, `AN general VM - likely no action`, `Opt-out tag present - confirm reapply`, or `AKS-managed - not impacted`.
 
 ## Sample output (anonymized)
 
-```
+```text
 RG        VM         Vendor            NVAClass                          ImageSource     OS      OSVersion                   AN        Tag      Verdict
 --------  ---------  ----------------  --------------------------------  --------------  ------  --------------------------  --------  -------  ------------------------------------------------------------
 rg-app    web-01     canonical         General (platform OS)             Platform        Linux   ubuntu-24_04-lts / server   Disabled  Not set  No action - AN disabled
-rg-net    nva-fw-01  paloaltonetworks  Policy-scoped NVA (auto-tag)      Marketplace     Linux   vmseries-flex / byol        Enabled   Not set  NVA (policy-scoped) - validate on host; policy auto-tags in scope
-rg-net    nva-el-01  elisityinc123     Marketplace - not in policy list  Marketplace     Linux   elisity-edge / edge         Enabled   Not set  Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready
-rg-net    nva-ac-01  acme-appliances   Third-party publisher (review)    Platform        Linux   acme-secure-gw / 2024       Enabled   Not set  Third-party publisher - verify on host; tag manually if it is an NVA
+rg-net    nva-fw-01  paloaltonetworks  Publisher-listed NVA (product match unverified)  Marketplace  Linux  vmseries-flex / byol  Enabled  Not set  Publisher-listed NVA - verify exact policy product match and vendor support
+rg-net    nva-el-01  elisityinc123     Marketplace - not in policy list  Marketplace     Linux   elisity-edge / edge         Enabled   Not set  Marketplace review - confirm workload and vendor support
+rg-net    nva-ac-01  acme-appliances   Third-party publisher (review)    Platform        Linux   acme-secure-gw / 2024       Enabled   Not set  Third-party publisher - classify workload and confirm vendor support
 rg-app    app-01     canonical         General (platform OS)             Platform        Linux   ubuntu-24_04-lts / server   Enabled   Not set  AN general VM - verify on host (likely no action)
 ```
 
@@ -91,10 +112,10 @@ Appliance OSes (Palo Alto **PAN-OS**, Cisco **IOS-XE / ASAv / FTDv**, Check Poin
 - **Check the vendor's MANA / Accelerated Networking compatibility matrix** (release notes / admin guide) for: supported VM series, minimum **PAN-OS/IOS-XE/FortiOS** version, and any required image/driver update.
 - **Confirm with the vendor (TAC/support case)** whether your exact version + VM size supports MANA, and the recommended upgrade path.
 - **Use the appliance's own CLI/console** where it exposes interface/driver detail (e.g., PAN-OS `show system state`, Cisco `show platform`/`show interface`), rather than Linux tools.
-- **If an NVA isn't confirmed MANA-compatible:** apply the `LegacyVMNVA` opt-out **proactively** (don't wait for degradation). For **Marketplace** appliances the built-in policy tags by publisher/product; for **BYO / non-Marketplace** images, apply the tag through your own tooling and coordinate with the vendor/MSP (see [implementation-legacyvmnva.md](./implementation-legacyvmnva.md#when-to-use--when-not-to-use)).
+- **If compatibility is uncertain:** obtain provider confirmation and run a representative pilot. Use `LegacyVMNVA` only after observed degradation or provider direction; BYO / non-Marketplace deployments follow the provider's tagging mechanism.
 
 > Do not assume a vendor supports (or doesn't support) MANA — always confirm against the vendor's current documentation for your version.
 
 ## Next step
 
-Take every **AN-enabled candidate on an eligible size** and confirm actual NIC/hardware with [verify-mana-nic.md](./verify-mana-nic.md). For any NVA **not confirmed MANA-compatible**, apply the [`LegacyVMNVA` opt-out](./implementation-legacyvmnva.md#when-to-use--when-not-to-use) **proactively** as a safeguard, then migrate and remove it.
+Take every **AN-enabled candidate on an eligible size** through host verification, supported-configuration review, and a representative pilot. Update or migrate unsupported configurations. Apply the [`LegacyVMNVA` opt-out](./implementation-legacyvmnva.md#when-to-use--when-not-to-use) only when its trigger is met.

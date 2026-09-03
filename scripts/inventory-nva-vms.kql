@@ -9,17 +9,16 @@
 //
 // Columns:
 //   Vendor        -- best-effort vendor: Marketplace PLAN publisher first, else image publisher.
-//   PlanPublisher -- Azure Marketplace plan publisher. THIS is what the built-in LegacyVMNVA
-//                    policy matches on (not imageReference.publisher). Empty => not a paid/BYOL
-//                    Marketplace image.
+//   PlanPublisher / PlanProduct -- Azure Marketplace fields used by the built-in LegacyVMNVA
+//                    policy. Publisher membership alone does not prove a product match.
 //   PlanProduct   -- Marketplace plan product/offer id.
-//   NVAClass      -- 6-state so NO third-party vendor is skipped: "Policy-scoped NVA (auto-tag)" |
+//   NVAClass      -- 6-state so no non-OS publisher is skipped: "Publisher-listed NVA (product match unverified)" |
 //                    "Marketplace - not in policy list (review)" | "Possible NVA - keyword hint (review)" |
 //                    "Custom/unknown image (review)" | "Third-party publisher (review)" | "General (platform OS)".
-//                    "General" is reached ONLY by a recognized first-party OS publisher (Microsoft / Canonical /
+//                    "General" is reached ONLY by a recognized OS publisher allow-list (Microsoft / Canonical /
 //                    RedHat / SUSE / Debian / Oracle / etc.) on a platform image -- every other publisher is flagged.
-//   ImageSource   -- Marketplace | Gallery/Custom | Platform | Custom/VHD. Determines whether the
-//                    built-in policy can auto-tag (only Marketplace publishers in scope are tagged).
+//   ImageSource   -- Marketplace | Gallery/Custom | Platform | Custom/VHD. Image provenance only;
+//                    it does not prove that the built-in policy matches the product.
 //   OSType        -- Linux / Windows -> tells you .sh (RunShellScript) vs .ps1 (RunPowerShellScript).
 //   OSVersion     -- image offer / sku (distro + version, e.g. "ubuntu-24_04-lts / server").
 //   AcceleratedNetworking -- per-NIC accurate: Enabled / Disabled / Partial (n/m) / No NIC found.
@@ -53,20 +52,21 @@ Resources
     PlanName       = tostring(plan.name),
     OSType         = tostring(properties.storageProfile.osDisk.osType),
     LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set")
-// Vendor: prefer the Marketplace PLAN publisher (what the LegacyVMNVA policy matches); else image publisher.
+// Vendor: prefer the Marketplace PLAN publisher (one policy input); else image publisher.
 | extend Vendor = iff(isnotempty(PlanPublisher), PlanPublisher, iff(isnotempty(ImgPublisher), ImgPublisher, "unknown/custom"))
 // OSVersion: the image offer/sku carries the distro/version.
 | extend OSVersion = iff(isnotempty(Sku), strcat(Offer, " / ", Sku), "custom image (no publisher/sku)")
-// ImageSource: how the VM was created -> whether the built-in policy can auto-tag it.
+// ImageSource: how the VM was created. Exact policy applicability still requires a product match.
 | extend ImageSource = case(
     isnotempty(PlanName), "Marketplace",
     isnotempty(GalleryImageId), "Gallery/Custom",
     isnotempty(ImgPublisher), "Platform",
     "Custom/VHD")
-// Known NVA publishers = snapshot of the built-in LegacyVMNVA policy default publisher allow-list.
-// The policy ONLY auto-applies the tag to these Marketplace publishers. Two entries are prefix
-// wildcards (a10networks*, zscaler*), handled separately below. Re-verify against the live policy
-// definition (e87a87f5-e6dd-4919-be21-abb0a4ea4630) for the complete/current set.
+// Known NVA publishers = snapshot of the built-in LegacyVMNVA policy publisher list.
+// This is a discovery hint only: the policy also matches associated Marketplace product IDs.
+// Two entries are prefix wildcards (a10networks*, zscaler*), handled separately below.
+// Re-verify the complete publisher/product combinations against policy
+// e87a87f5-e6dd-4919-be21-abb0a4ea4630.
 | extend _nvaPublishers = dynamic([
     'arista-networks','asdivertissementinc1617837708654','avi-networks','aviatrix-systems',
     'barracudanetworks','bluecat','checkpoint','cisco','citrix','cohesive',
@@ -78,26 +78,26 @@ Resources
     'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
 // Normalize the vendor (trim + lowercase) so casing/whitespace never cause a miss.
 | extend _pubLower = tolower(trim(' ', Vendor))
-| extend _policyScoped = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
+| extend _publisherListed = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
 // Keyword hint = catches likely NVAs whose publisher is NOT policy-listed (unlisted Marketplace,
 // gallery/custom/VHD, publisher variants, misspellings). Best-effort; only routes to "review", never skips.
 | extend _hay = tolower(strcat(Vendor, ' ', PlanProduct, ' ', Offer, ' ', Sku, ' ', name))
 | extend _kwHit = _hay matches regex 'firewall|fortinet|fortigate|palo ?alto|pan-?os|check ?point|cisco|f5|big-?ip|barracuda|sonicwall|sophos|watchguard|zscaler|netskope|versa|velocloud|sd-?wan|ngfw|aviatrix|arista|juniper|netscaler|imperva|radware|riverbed|silver-?peak|els?ity'
-// First-party / OS publishers = the ONLY publishers allowed to resolve to "General". ANY publisher not on
-// this list (and not a Microsoft first-party publisher) is flagged "Third-party publisher (review)" -- this
-// is the resilience backstop so even a niche appliance shipped as a plain platform image is never skipped.
-| extend _osPublishers = dynamic([
+// Recognized OS publishers = the ONLY publishers allowed to resolve to "General". This allow-list is a
+// routing aid, not a claim of Microsoft ownership or MANA support. Any publisher outside it is reviewed.
+| extend _recognizedOSPublishers = dynamic([
     'canonical','redhat','suse','debian','credativ','oracle','openlogic',
     'almalinux','resf','rockylinux','kali-linux'])
-| extend _isKnownOS = set_has_element(_osPublishers, _pubLower) or _pubLower startswith 'microsoft'
-// NVAClass -- 6-state so NO third-party vendor is silently skipped: everything except a recognized first-party
-// OS platform image lands in an explicit "review" bucket. Policy-scoped => the built-in policy can auto-tag it.
+| extend _recognizedOSPublisher = set_has_element(_recognizedOSPublishers, _pubLower) or _pubLower startswith 'microsoft'
+// NVAClass -- everything except a recognized OS platform image lands in an explicit "review" bucket.
+// Publisher-listed remains a review state
+// until the exact Marketplace product is checked against the live policy.
 | extend NVAClass = case(
-    _policyScoped, "Policy-scoped NVA (auto-tag)",
+    _publisherListed, "Publisher-listed NVA (product match unverified)",
     isnotempty(PlanPublisher), "Marketplace - not in policy list (review)",
     _kwHit, "Possible NVA - keyword hint (review)",
     ImageSource in ("Gallery/Custom","Custom/VHD"), "Custom/unknown image (review)",
-    not(_isKnownOS), "Third-party publisher (review)",
+    not(_recognizedOSPublisher), "Third-party publisher (review)",
     "General (platform OS)")
 | project vmId = tolower(id), VMName = name, VMSize = tostring(properties.hardwareProfile.vmSize),
     Vendor, PlanPublisher, PlanProduct, NVAClass, ImageSource, OSType, OSVersion, Offer, Sku, ImgVersion,
@@ -123,11 +123,11 @@ Resources
     NICCount == 0, "Review - no NIC data",
     ANEnabledNICs == 0, "No action - AN disabled",
     LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
-    NVAClass == "Policy-scoped NVA (auto-tag)", "NVA (policy-scoped) - validate on host; policy auto-tags in scope",
-    NVAClass startswith "Marketplace", "Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready",
-    NVAClass startswith "Possible", "Possible NVA (keyword hint) - verify on host; tag manually if it is an NVA",
-    NVAClass startswith "Custom", "Unknown/custom image - verify on host; tag manually if it is an NVA",
-    NVAClass startswith "Third-party", "Third-party publisher - verify on host; tag manually if it is an NVA",
+    NVAClass == "Publisher-listed NVA (product match unverified)", "Publisher-listed NVA - verify exact policy product match and vendor support",
+    NVAClass startswith "Marketplace", "Marketplace review - confirm workload and vendor support",
+    NVAClass startswith "Possible", "Possible NVA - classify workload and confirm vendor support",
+    NVAClass startswith "Custom", "Unknown/custom image - inspect image and workload assumptions",
+    NVAClass startswith "Third-party", "Third-party publisher - classify workload and confirm vendor support",
     "AN general VM - verify on host (likely no action)")
 | project
     subscriptionId,

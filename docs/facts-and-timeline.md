@@ -1,7 +1,7 @@
 # MANA / NVA — Validated Facts & Timeline
 
 > All statements below are confirmed against official Microsoft Learn pages. See [references.md](./references.md).
-> **Verified:** 2026-08-20. Source pages last updated 2026-08-06 (opt-out) / 2026-08-11 (existing-sizes). Re-verify dates against the live docs before relying on them.
+> **Verified:** 2026-09-03. Source pages last updated 2026-08-06 (opt-out) / 2026-08-11 (existing-sizes). Re-verify dates against the live docs before relying on them.
 
 ## 1. What MANA is
 
@@ -19,22 +19,21 @@
 
 - **Most workloads transition without issue.**
 - **NVAs are uniquely impacted** due to direct dependency on the underlying network hardware and drivers.
-- **DPDK-based workloads** are also impacted — DPDK on MANA requires Linux kernel **6.14+** or backported drivers.
+- **DPDK-based workloads** are also impacted — DPDK on MANA requires Linux kernel **6.14+** or backports of the 6.14+ MANA Ethernet and InfiniBand drivers.
 - **Not impacted:** Azure Kubernetes Service (AKS) instances; VNet encryption. Both continue to perform as expected on MANA hardware.
 - **If Accelerated Networking is NOT enabled on the VM → no action required.** The VM may still land on MANA hardware but the workload runs as expected.
 
 ## 4. Eligible VM series (may land on MANA-capable hardware)
 
-| Family    | Series                                                                                                                                 |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| A-family  | Av2\*                                                                                                                                  |
-| B-family  | Bsv2                                                                                                                                   |
-| D-family  | Dv1\*, Dsv1\*, Dv2\*, Dsv2\*, Dv3, Dsv3, Dv4, Dsv4, Ddv4, Ddsv4, Dv5, Dsv5, Ddv5, Ddsv5, Dlsv5, Dldsv5, Dpsv6, Dpdsv6, Dplsv6, Dpldsv6 |
-| E-family  | Ev3, Esv3, Ev4, Esv4, Edv4, Edsv4, Ev5, Esv5, Edv5, Edsv5, Epsv6, Epdsv6                                                               |
-| Eb-family | Ebsv5, Ebdsv5                                                                                                                          |
-| F-family  | F\*, Fs\*, Fsv2\*                                                                                                                      |
-| G-family  | G\*, Gs\*                                                                                                                              |
-| L-family  | Ls\*                                                                                                                                   |
+| Family   | Series                                                                                                                                 |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| A-family | Av2\*                                                                                                                                  |
+| B-family | Bsv2                                                                                                                                   |
+| D-family | Dv1\*, Dsv1\*, Dv2\*, Dsv2\*, Dv3, Dsv3, Dv4, Dsv4, Ddv4, Ddsv4, Dv5, Dsv5, Ddv5, Ddsv5, Dlsv5, Dldsv5, Dpsv6, Dpdsv6, Dplsv6, Dpldsv6 |
+| E-family | Ev3, Esv3, Ev4, Esv4, Edv4, Edsv4, Ev5, Esv5, Edv5, Edsv5, Epsv6, Epdsv6                                                               |
+| F-family | F\*, Fs\*, Fsv2\*                                                                                                                      |
+| G-family | G\*, Gs\*                                                                                                                              |
+| L-family | Ls\*                                                                                                                                   |
 
 \* Announced for retirement — migrate to a replacement series. See the retired-sizes list and migration guide in [references.md](./references.md).
 
@@ -44,12 +43,12 @@
 
 | Milestone                                                                                                                                                                  | Date                      | Notes                                                                                                                                                                                         |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Earliest MANA placement — **Intel v5** (Dv5/Dsv5/Ddv5/Ddsv5/Dlsv5/Dldsv5/Ev5/Esv5/Edv5/Edsv5) & **Cobalt 100 v6** (Dpsv6/Dpdsv6/Dplsv6/Dpldsv6/Epsv6/Epdsv6), Public cloud | **May 26, 2026**          | Apply + enable tag before this date                                                                                                                                                           |
-| Earliest MANA placement — **all other eligible series** (Dsv2, Dv2, Dsv3, Dv3, Dsv4, Dv4, Esv3/4, Bsv2, Av2, Fsv2, Fs, F, G, GS, Ls, …)                                    | **Timeline under review** | **No confirmed date yet** — Microsoft has not published one. Apply + enable the tag proactively; re-check the live page.                                                                      |
+| Earliest MANA placement — **Intel v5** (Dv5/Dsv5/Ddv5/Ddsv5/Dlsv5/Dldsv5/Ev5/Esv5/Edv5/Edsv5) & **Cobalt 100 v6** (Dpsv6/Dpdsv6/Dplsv6/Dpldsv6/Epsv6/Epdsv6), Public cloud | **May 26, 2026**          | Complete compatibility review and migration planning before this date; enable an exception before the date only if it is needed                                                               |
+| Earliest MANA placement — **all other eligible series** (Dsv2, Dv2, Dsv3, Dv3, Dsv4, Dv4, Esv3/4, Bsv2, Av2, Fsv2, Fs, F, G, GS, Ls, …)                                    | **Timeline under review** | **No confirmed date yet** — Microsoft has not published one; re-check the live page                                                                                                           |
 | **`LegacyVMNVA` tag honored until**                                                                                                                                        | **May 31, 2027**          | If tag applied+enabled before this date, VM avoids MANA placement until this date                                                                                                             |
 | Tag no longer honored                                                                                                                                                      | **After May 31, 2027**    | Tag no longer honored; MANA-eligible series may be placed on MANA-capable hardware. Make NVAs MANA-compatible before this date; Microsoft recommends removing the policy assignment afterward |
 
-> **Important:** the live docs (opt-out + existing-sizes, updated Aug 2026) list **only** May 26, 2026 (Intel v5 + Cobalt 100 v6) as a confirmed date; **every other series — including Dsv2/Dv2/Dsv3/etc. — is "Timeline under review" with no published date.** An earlier "August 6, 2026 (Intel v1–v4)" date has been **removed** from the docs. Because a placement date can appear at any time, apply the tag proactively rather than waiting for a date.
+> **Important:** the live docs list **only** May 26, 2026 (Intel v5 + Cobalt 100 v6) as a confirmed date; **every other series — including Dsv2/Dv2/Dsv3/etc. — is "Timeline under review" with no published date.** Re-check the live page and complete compatibility work without inferring that every candidate needs the tag.
 
 ## 6. Network performance if OS doesn't support MANA (fallback)
 
@@ -61,8 +60,8 @@ If a VM lands on MANA hardware but the OS doesn't support MANA, networking **fal
 
 ## 7. The `LegacyVMNVA` temporary exception
 
-- A **tag** applied via a **built-in Azure Policy** that keeps NVA VMs / VM Scale Sets off MANA hardware while you migrate.
-- **Use as a proactive safeguard** for Accelerated Networking NVAs **not yet confirmed MANA-compatible** — apply **before** a placement change rather than waiting for degradation (which can cause an outage). The official opt-out page frames the trigger as _observed performance degradation_; applying proactively is the safer operational practice. Do **not** apply broadly — see [when to use / when not to use](./implementation-legacyvmnva.md#when-to-use--when-not-to-use).
+- An **applied and enabled tag**, deployable through a **built-in Azure Policy** for its matched Marketplace products, that temporarily keeps NVA VMs / VM Scale Sets off MANA hardware while you migrate.
+- Microsoft says the exception is needed for Accelerated Networking workloads that **observe degradation** on MANA-capable hardware. A provider may also direct it during migration. Do **not** use compatibility uncertainty alone as proof that the tag is required.
 - The built-in policy **scopes tag application to specific NVA publishers and product IDs in Azure Marketplace**.
 - Applying the policy has **no cost implications**.
 - The built-in policy **cannot be edited directly** (duplicate it if customization is needed).

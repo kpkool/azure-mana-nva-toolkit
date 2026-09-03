@@ -34,7 +34,7 @@ Resources
     LegacyVMNVATag = iff(isnotempty(tostring(tags['LegacyVMNVA'])), tostring(tags['LegacyVMNVA']), "Not set"),
     AKSCluster     = tostring(tags['aks-managed-cluster-name']),
     nicConfigs     = properties.virtualMachineProfile.networkProfile.networkInterfaceConfigurations
-// Vendor: prefer Marketplace PLAN publisher (what the policy matches); else image publisher.
+// Vendor: prefer Marketplace PLAN publisher (one policy input); else image publisher.
 | extend Vendor = iff(isnotempty(PlanPublisher), PlanPublisher, iff(isnotempty(ImgPublisher), ImgPublisher, "unknown/custom"))
 | extend OSVersion = iff(isnotempty(Sku), strcat(Offer, " / ", Sku), "custom image (no publisher/sku)")
 | extend ImageSource = case(
@@ -42,9 +42,10 @@ Resources
     isnotempty(GalleryImageId), "Gallery/Custom",
     isnotempty(ImgPublisher), "Platform",
     "Custom/VHD")
-// Known NVA publishers = snapshot of the built-in LegacyVMNVA policy default publisher allow-list
-// (policy e87a87f5-e6dd-4919-be21-abb0a4ea4630). a10networks*/zscaler* are prefix wildcards.
-// Re-verify against the live policy for the current set.
+// Known NVA publishers = snapshot of the built-in LegacyVMNVA policy publisher list.
+// Publisher membership is a discovery hint only because the policy also matches associated
+// Marketplace product IDs. Re-verify exact combinations against policy
+// e87a87f5-e6dd-4919-be21-abb0a4ea4630. a10networks*/zscaler* are prefix wildcards.
 | extend _nvaPublishers = dynamic([
     'arista-networks','asdivertissementinc1617837708654','avi-networks','aviatrix-systems',
     'barracudanetworks','bluecat','checkpoint','cisco','citrix','cohesive',
@@ -55,22 +56,22 @@ Resources
     'sophos','technicheltd1606969724100','trendmicro','twistlock','velocloud','versanetworks',
     'virtualpulsesro1607008728942','vmware-inc','voleatechgmbh1636966911943','watchguard-technologies'])
 | extend _pubLower = tolower(trim(' ', Vendor))
-| extend _policyScoped = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
+| extend _publisherListed = set_has_element(_nvaPublishers, _pubLower) or _pubLower startswith 'a10networks' or _pubLower startswith 'zscaler'
 | extend _hay = tolower(strcat(Vendor, ' ', PlanProduct, ' ', Offer, ' ', Sku, ' ', name))
 | extend _kwHit = _hay matches regex 'firewall|fortinet|fortigate|palo ?alto|pan-?os|check ?point|cisco|f5|big-?ip|barracuda|sonicwall|sophos|watchguard|zscaler|netskope|versa|velocloud|sd-?wan|ngfw|aviatrix|arista|juniper|netscaler|imperva|radware|riverbed|silver-?peak|els?ity'
-// First-party / OS publishers = the ONLY publishers allowed to resolve to "General"; anything else is flagged
-// "Third-party publisher (review)" (resilience backstop -- see inventory-nva-vms.kql for the rationale).
-| extend _osPublishers = dynamic([
+// Recognized OS publishers = the ONLY publishers allowed to resolve to "General". This allow-list is a
+// routing aid, not a claim of Microsoft ownership or MANA support (see inventory-nva-vms.kql).
+| extend _recognizedOSPublishers = dynamic([
     'canonical','redhat','suse','debian','credativ','oracle','openlogic',
     'almalinux','resf','rockylinux','kali-linux'])
-| extend _isKnownOS = set_has_element(_osPublishers, _pubLower) or _pubLower startswith 'microsoft'
-// NVAClass -- 6-state so NO third-party vendor is silently skipped (see inventory-nva-vms.kql for details).
+| extend _recognizedOSPublisher = set_has_element(_recognizedOSPublishers, _pubLower) or _pubLower startswith 'microsoft'
+// NVAClass -- every publisher outside the recognized OS allow-list is reviewed.
 | extend NVAClass = case(
-    _policyScoped, "Policy-scoped NVA (auto-tag)",
+    _publisherListed, "Publisher-listed NVA (product match unverified)",
     isnotempty(PlanPublisher), "Marketplace - not in policy list (review)",
     _kwHit, "Possible NVA - keyword hint (review)",
     ImageSource in ("Gallery/Custom","Custom/VHD"), "Custom/unknown image (review)",
-    not(_isKnownOS), "Third-party publisher (review)",
+    not(_recognizedOSPublisher), "Third-party publisher (review)",
     "General (platform OS)")
 | extend NICConfigCount = array_length(nicConfigs)
 | mv-expand nic = nicConfigs
@@ -83,18 +84,18 @@ Resources
     ANEnabledNICs == 0, "Disabled",
     ANEnabledNICs == NICConfigCount, "Enabled",
     strcat("Partial (", tostring(ANEnabledNICs), "/", tostring(NICConfigCount), ")"))
-| extend IsAKS = (isnotempty(AKSCluster) or VMSSName startswith "aks-")
+| extend IsAKS = isnotempty(AKSCluster)
 // Triage verdict -- control-plane signal only; always confirm on-host. AKS is not impacted by MANA.
 | extend Assessment = case(
     IsAKS, "AKS-managed - not impacted by MANA (per docs)",
     isnull(NICConfigCount) or NICConfigCount == 0, "Review - no NIC config",
     ANEnabledNICs == 0, "No action - AN disabled",
     LegacyVMNVATag != "Not set", "Opt-out tag present - confirm reapply, then plan migration",
-    NVAClass == "Policy-scoped NVA (auto-tag)", "NVA (policy-scoped) - validate on host; policy auto-tags in scope",
-    NVAClass startswith "Marketplace", "Marketplace NVA NOT in policy list - verify on host; tag MANUALLY if not MANA-ready",
-    NVAClass startswith "Possible", "Possible NVA (keyword hint) - verify on host; tag manually if it is an NVA",
-    NVAClass startswith "Custom", "Unknown/custom image - verify on host; tag manually if it is an NVA",
-    NVAClass startswith "Third-party", "Third-party publisher - verify on host; tag manually if it is an NVA",
+    NVAClass == "Publisher-listed NVA (product match unverified)", "Publisher-listed NVA - verify exact policy product match and vendor support",
+    NVAClass startswith "Marketplace", "Marketplace review - confirm workload and vendor support",
+    NVAClass startswith "Possible", "Possible NVA - classify workload and confirm vendor support",
+    NVAClass startswith "Custom", "Unknown/custom image - inspect image and workload assumptions",
+    NVAClass startswith "Third-party", "Third-party publisher - classify workload and confirm vendor support",
     "AN general VMSS - verify on host (likely no action)")
 | project
     subscriptionId,

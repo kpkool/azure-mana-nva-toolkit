@@ -1,0 +1,10 @@
+{
+  "value": [
+    {
+      "code": "ComponentStatus/StdOut/succeeded",
+      "displayStatus": "Provisioning succeeded",
+      "level": "Info",
+      "message": "RAW_GUEST_SECRET_SHOULD_NOT_PERSIST\nMANA_RESULT_JSON={\"schemaVersion\":\"1.1\",\"os\":\"Linux\",\"guestEvidenceStatus\":\"PASS\",\"reasonCode\":\"MANA_DRIVER_BOUND\",\"guestEvidenceScope\":\"VM\",\"hardwareState\":\"MANA\",\"guestAnState\":\"yes\",\"vfCount\":1,\"manaVfCount\":1,\"nonManaVfCount\":0,\"manaDriverAvailable\":true,\"datapathState\":\"CONFIRMED\",\"datapathScope\":\"VM_AGGREGATE\",\"tagState\":\"absent\",\"customizationRisk\":\"NONE_DETECTED\",\"customizationSignals\":[]}\n"
+    }
+  ]
+}
