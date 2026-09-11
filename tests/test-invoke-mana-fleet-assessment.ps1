@@ -14,7 +14,13 @@ function Assert-True([bool]$Condition, [string]$Message) {
   if (-not $Condition) { throw "ASSERTION FAILED: $Message" }
 }
 
-function Invoke-Runner([string]$Output, [switch]$Resume, [switch]$InventoryOnly, [switch]$Redact) {
+function Invoke-Runner(
+  [string]$Output,
+  [switch]$Resume,
+  [switch]$InventoryOnly,
+  [switch]$Redact,
+  [int]$ThrottleLimit = 5
+) {
   $arguments = @(
     '-NoProfile', '-File', $runner,
     '-SubscriptionId', $subscriptionId,
@@ -22,6 +28,7 @@ function Invoke-Runner([string]$Output, [switch]$Resume, [switch]$InventoryOnly,
     '-PageSize', '2',
     '-MaxAttempts', '2',
     '-InitialRetryDelaySeconds', '1',
+    '-ThrottleLimit', [string]$ThrottleLimit,
     '-AzExecutable', $fakeAz
   )
   if ($Resume) { $arguments += '-Resume' }
@@ -42,8 +49,12 @@ try {
   $firstExitCode = Invoke-Runner -Output $outputRoot
   Assert-True ($firstExitCode -eq 2) 'The first run must report a partial result for the deallocated VM.'
   $firstSummary = Get-Content (Join-Path $outputRoot 'summary.json') -Raw | ConvertFrom-Json
-  $firstRows = @(Get-Content (Join-Path $outputRoot 'assessment.json') -Raw | ConvertFrom-Json)
+  $firstRows = Get-Content (Join-Path $outputRoot 'assessment.json') -Raw | ConvertFrom-Json
+  $firstRows = @($firstRows)
   Assert-True ($firstSummary.runStatus -eq 'PARTIAL') 'First summary status must be PARTIAL.'
+  Assert-True ($firstSummary.throttleLimit -eq 5) 'Summary must record the requested throttle limit.'
+  Assert-True ($firstSummary.candidateVmCount -eq 3) 'Summary must record the candidate VM count.'
+  Assert-True ($firstSummary.inventoryDurationSeconds -ge 0 -and $firstSummary.guestProbeDurationSeconds -ge 0) 'Summary must record non-negative phase timings.'
   Assert-True ($firstRows.Count -eq 5) 'All five inventory records must be reported.'
   $generalRow = $firstRows | Where-Object VMName -eq 'vm-general'
   Assert-True ($generalRow.ReadinessStatus -eq 'REVIEW_REQUIRED') 'Guest telemetry alone must not classify a workload READY.'
@@ -65,12 +76,14 @@ try {
   Assert-True ($persistedText -notmatch 'RAW_GUEST_SECRET_SHOULD_NOT_PERSIST') 'Raw guest output must not be persisted.'
 
   $env:MANA_FAKE_WINDOWS_RUNNING = '1'
-  $resumeExitCode = Invoke-Runner -Output $outputRoot -Resume
+  $resumeExitCode = Invoke-Runner -Output $outputRoot -Resume -ThrottleLimit 1
   Assert-True ($resumeExitCode -eq 0) 'Resume must complete after the pending VM becomes available.'
   $resumeSummary = Get-Content (Join-Path $outputRoot 'summary.json') -Raw | ConvertFrom-Json
-  $resumeRows = @(Get-Content (Join-Path $outputRoot 'assessment.json') -Raw | ConvertFrom-Json)
+  $resumeRows = Get-Content (Join-Path $outputRoot 'assessment.json') -Raw | ConvertFrom-Json
+  $resumeRows = @($resumeRows)
   $checkpoint = Get-Content (Join-Path $outputRoot 'checkpoint.json') -Raw | ConvertFrom-Json
   Assert-True ($resumeSummary.runStatus -eq 'COMPLETE') 'Resumed summary status must be COMPLETE.'
+  Assert-True ($resumeSummary.throttleLimit -eq 1) 'Resume must allow a different throttle without invalidating evidence.'
   $windowsRow = $resumeRows | Where-Object VMName -eq 'vm-windows'
   Assert-True ($windowsRow.ReadinessStatus -eq 'REVIEW_REQUIRED') 'Resumed Windows telemetry must still require a workload pilot.'
   Assert-True ($windowsRow.DatapathScope -eq 'VM_SHARED_MANA_VF') 'Windows datapath evidence must identify the VM-shared MANA VF scope.'
@@ -104,5 +117,8 @@ try {
   Remove-Item Env:MANA_FAKE_FAIL_RUN_ONCE -ErrorAction SilentlyContinue
   Remove-Item Env:MANA_FAKE_WINDOWS_RUNNING -ErrorAction SilentlyContinue
   Remove-Item Env:MANA_FAKE_INVENTORY_CHANGED -ErrorAction SilentlyContinue
+  Remove-Item Env:MANA_FAKE_GRAPH_DELAY_MS -ErrorAction SilentlyContinue
+  Remove-Item Env:MANA_FAKE_POWER_DELAY_MS -ErrorAction SilentlyContinue
+  Remove-Item Env:MANA_FAKE_RUN_DELAY_MS -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

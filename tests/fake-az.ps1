@@ -14,7 +14,36 @@ function Get-ArgumentValue([string]$Name) {
 }
 
 function Add-Call([string]$Value) {
-  Add-Content -LiteralPath (Join-Path $stateRoot 'calls.log') -Value $Value -Encoding UTF8
+  $path = Join-Path $stateRoot 'calls.log'
+  for ($attempt = 1; $attempt -le 200; $attempt++) {
+    $stream = $null
+    $writer = $null
+    try {
+      $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write, [IO.FileShare]::None)
+      $writer = New-Object IO.StreamWriter($stream, (New-Object Text.UTF8Encoding($false)))
+      $writer.WriteLine($Value)
+      $writer.Flush()
+      return
+    } catch [IO.IOException] {
+      if ($attempt -eq 200) { throw }
+      Start-Sleep -Milliseconds 10
+    } finally {
+      if ($null -ne $writer) { $writer.Dispose() }
+      elseif ($null -ne $stream) { $stream.Dispose() }
+    }
+  }
+}
+
+function Invoke-TestDelay([string]$VariableName) {
+  $value = [Environment]::GetEnvironmentVariable($VariableName)
+  if ([string]::IsNullOrWhiteSpace($value)) { return }
+
+  $milliseconds = 0
+  if (-not [int]::TryParse($value, [ref]$milliseconds) -or $milliseconds -lt 0) {
+    [Console]::Error.WriteLine("(TestConfigurationError) $VariableName must be a non-negative integer.")
+    exit 1
+  }
+  if ($milliseconds -gt 0) { Start-Sleep -Milliseconds $milliseconds }
 }
 
 function Update-TestCounter([string]$Name) {
@@ -27,6 +56,7 @@ function Update-TestCounter([string]$Name) {
 
 if ($cliArguments.Count -ge 2 -and $cliArguments[0] -eq 'graph' -and $cliArguments[1] -eq 'query') {
   Add-Call 'graph-query'
+  Invoke-TestDelay 'MANA_FAKE_GRAPH_DELAY_MS'
   $graphAttempt = Update-TestCounter 'graph'
   if ($env:MANA_FAKE_FAIL_GRAPH_ONCE -eq '1' -and $graphAttempt -eq 1) {
     [Console]::Error.WriteLine('(TooManyRequests) Injected transient ARG failure.')
@@ -56,6 +86,7 @@ if ($cliArguments.Count -ge 2 -and $cliArguments[0] -eq 'graph' -and $cliArgumen
 if ($cliArguments.Count -ge 2 -and $cliArguments[0] -eq 'vm' -and $cliArguments[1] -eq 'get-instance-view') {
   $vmName = Get-ArgumentValue '--name'
   Add-Call "power:$vmName"
+  Invoke-TestDelay 'MANA_FAKE_POWER_DELAY_MS'
   if ($vmName -eq 'vm-windows' -and $env:MANA_FAKE_WINDOWS_RUNNING -ne '1') {
     [Console]::Out.Write('"PowerState/deallocated"')
   } else {
@@ -67,6 +98,7 @@ if ($cliArguments.Count -ge 2 -and $cliArguments[0] -eq 'vm' -and $cliArguments[
 if ($cliArguments.Count -ge 3 -and $cliArguments[0] -eq 'vm' -and $cliArguments[1] -eq 'run-command') {
   $vmName = Get-ArgumentValue '--name'
   Add-Call "run:$vmName"
+  Invoke-TestDelay 'MANA_FAKE_RUN_DELAY_MS'
   if ($vmName -eq 'vm-general') {
     $runAttempt = Update-TestCounter 'run-vm-general'
     if ($env:MANA_FAKE_FAIL_RUN_ONCE -eq '1' -and $runAttempt -eq 1) {

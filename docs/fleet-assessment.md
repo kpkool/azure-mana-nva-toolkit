@@ -11,6 +11,10 @@ pwsh ./scripts/invoke-mana-fleet-assessment.ps1 `
   -OutputDirectory ./mana-assessment-output
 ```
 
+The default `-ThrottleLimit 5` runs guest probes concurrently across distinct VMs. To serialize probes while
+diagnosing throttling or another active Run Command, resume with `-ThrottleLimit 1`. The accepted range is 1-32;
+start at the default and increase only in a controlled maintenance window.
+
 Useful modes:
 
 ```powershell
@@ -22,6 +26,10 @@ pwsh ./scripts/invoke-mana-fleet-assessment.ps1 -SubscriptionId <id> `
 pwsh ./scripts/invoke-mana-fleet-assessment.ps1 -SubscriptionId <id> `
   -OutputDirectory ./mana-assessment-output -Resume
 
+# Resume serially without invalidating the existing checkpoint
+pwsh ./scripts/invoke-mana-fleet-assessment.ps1 -SubscriptionId <id> `
+  -OutputDirectory ./mana-assessment-output -Resume -ThrottleLimit 1
+
 # Hash subscription, resource-group, VM, and NIC identifiers in reports
 pwsh ./scripts/invoke-mana-fleet-assessment.ps1 -SubscriptionId <id> `
   -OutputDirectory ./mana-shareable -InventoryOnly -RedactResourceNames
@@ -29,6 +37,42 @@ pwsh ./scripts/invoke-mana-fleet-assessment.ps1 -SubscriptionId <id> `
 
 The runner accepts multiple subscription IDs and optional `-ResourceGroup` and `-VmName` filters. It requires
 PowerShell 5.1+ and Azure CLI with the Resource Graph extension.
+
+## Performance and throttling
+
+The runner first retrieves complete, paged inventory for the selected subscriptions, then applies resource-group
+and VM filters locally. Selected-subscription fleet size affects this inventory prelude; only filtered VMs with a
+`POTENTIAL` NIC incur guest work. Each running candidate requires an instance-view call followed by one blocking
+Action Run Command.
+
+Concurrency is bounded across distinct VMs. The scheduler assigns at most one worker to each VM; Azure permits one
+active Action Run Command script per VM. Workers return structured results only; the parent process owns event and
+checkpoint writes. Every completed remote probe is checkpointed immediately. Deterministic no-probe results, such
+as AN-disabled VMs, are checkpointed in one batch before remote work starts.
+
+`ThrottleLimit` changes scheduling, not evidence identity, so it can be changed with `-Resume`. For sustained `429`
+responses, lower the limit and resume. For a persistent `Conflict`, allow the VM's existing Run Command to finish,
+then resume. Existing bounded exponential retries still apply. Compute and Resource Manager limits are also enforced
+per subscription and region, so `32` is a ceiling, not a recommendation.
+
+### Reproducible benchmark
+
+The deterministic fixture injects 300 ms into each power check and 700 ms into each Run Command. On the Windows
+development workstation using PowerShell 7, a five-trial run against three candidate VMs produced:
+
+| Mode                            | Median time | Result        |
+| ------------------------------- | ----------: | ------------- |
+| `ThrottleLimit 1`               |     8.727 s | 9 Azure calls |
+| `ThrottleLimit 5` (effective 3) |     4.504 s | 9 Azure calls |
+
+That is a `1.94x` speedup and `48.4%` elapsed-time reduction. All assessments were byte-identical. These fixture
+numbers prove that overlap removes serialization cost; they are not an Azure runtime SLA. Real improvement depends
+on candidate count, guest-agent latency, retry activity, and service throttling.
+
+`summary.json` records `candidateVmCount`, `throttleLimit`, `inventoryDurationSeconds`,
+`guestProbeDurationSeconds`, and `collectionDurationSeconds`. Use these per-run measurements to identify whether
+inventory or guest commands dominate in the target subscription. On resume, candidate count and guest time cover
+only probes attempted by that invocation.
 
 ## Status contract
 
@@ -67,9 +111,9 @@ Conservative rules:
 
 Azure Resource Graph pages are ordered by unique VM/NIC IDs and followed with `skip_token`. The runner rejects
 duplicate, repeated-token, and incomplete result sets rather than silently publishing a partial inventory.
-Azure CLI failures use bounded exponential retries; each VM result is checkpointed immediately.
+Azure CLI failures use bounded exponential retries; each completed remote probe is checkpointed immediately.
 
-Action Run Command returns only its last 4,096 bytes and permits one active script at a time. Each validator
+Action Run Command returns only its last 4,096 bytes and permits one active script per VM at a time. Each validator
 therefore emits a compact final `MANA_RESULT_JSON=` record. The runner parses only that record and never saves
 the raw Run Command message, which can contain host or network details.
 
@@ -80,10 +124,15 @@ pending VMs can be retried with `-Resume`. A fatal inventory or configuration er
 
 ```powershell
 pwsh ./tests/test-invoke-mana-fleet-assessment.ps1
+
+# Compare serial and bounded execution with deterministic latency
+pwsh ./tests/benchmark-invoke-mana-fleet-assessment.ps1 -Trials 3
 ```
 
 The fixtures cover pagination, transient failures, checkpoint/resume, stopped VMs, report redaction, custom
-images, and suppression of raw guest output.
+images, both throttle paths, result equivalence, and suppression of raw guest output.
 
 **Official references:** [Resource Graph pagination](https://learn.microsoft.com/azure/governance/resource-graph/concepts/paging-results) ·
-[Run Command limits](https://learn.microsoft.com/azure/virtual-machines/run-command-overview#compare-feature-support)
+[Run Command limits](https://learn.microsoft.com/azure/virtual-machines/run-command-overview#compare-feature-support) ·
+[Compute throttling](https://learn.microsoft.com/azure/virtual-machines/compute-throttling-limits) ·
+[Resource Manager throttling](https://learn.microsoft.com/azure/azure-resource-manager/management/request-limits-and-throttling)

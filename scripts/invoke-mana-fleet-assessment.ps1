@@ -5,8 +5,8 @@
 
 .DESCRIPTION
   Paginates Azure Resource Graph, invokes one OS-specific guest validator per
-  running candidate VM, and writes JSON, CSV, summary, and checkpoint files.
-  Raw Run Command output is never persisted.
+  running candidate VM with bounded cross-VM concurrency, and writes JSON,
+  CSV, summary, and checkpoint files. Raw Run Command output is never persisted.
 #>
 [CmdletBinding()]
 param(
@@ -24,6 +24,9 @@ param(
 
   [ValidateRange(1, 60)]
   [int]$InitialRetryDelaySeconds = 2,
+
+  [ValidateRange(1, 32)]
+  [int]$ThrottleLimit = 5,
 
   [string[]]$ResourceGroup,
   [string[]]$VmName,
@@ -107,13 +110,19 @@ function Invoke-AzJson {
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     $errorPath = Join-Path ([IO.Path]::GetTempPath()) "mana-az-$PID-$([guid]::NewGuid().ToString('N')).err"
     try {
-      if ([IO.Path]::GetExtension($AzExecutable) -ieq '.ps1') {
-        $powerShellHost = (Get-Process -Id $PID).Path
-        $output = @(& $powerShellHost -NoProfile -File $AzExecutable @Arguments 2> $errorPath)
-      } else {
-        $output = @(& $AzExecutable @Arguments 2> $errorPath)
+      $savedErrorActionPreference = $ErrorActionPreference
+      try {
+        $ErrorActionPreference = 'Continue'
+        if ([IO.Path]::GetExtension($AzExecutable) -ieq '.ps1') {
+          $powerShellHost = (Get-Process -Id $PID).Path
+          $output = @(& $powerShellHost -NoProfile -File $AzExecutable @Arguments 2> $errorPath)
+        } else {
+          $output = @(& $AzExecutable @Arguments 2> $errorPath)
+        }
+        $exitCode = $LASTEXITCODE
+      } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
       }
-      $exitCode = $LASTEXITCODE
       $errorText = if (Test-Path -LiteralPath $errorPath) { [IO.File]::ReadAllText($errorPath) } else { '' }
       if ($exitCode -eq 0) {
         try {
@@ -208,13 +217,31 @@ function Save-Checkpoint {
   Write-JsonAtomic -Value $Checkpoint -Path $checkpointPath
 }
 
-function Set-GuestResult {
-  param($Checkpoint, $Result, [bool]$MarkComplete)
-  $Checkpoint.guestResults = @($Checkpoint.guestResults | Where-Object { $_.vmId -ne $Result.vmId }) + @($Result)
+function Set-GuestResults {
+  param($Checkpoint, [object[]]$Results, [bool]$MarkComplete)
+  if ($Results.Count -eq 0) { return }
+
+  $resultByVmId = @{}
+  foreach ($existingResult in @($Checkpoint.guestResults)) {
+    $resultByVmId[[string]$existingResult.vmId] = $existingResult
+  }
+  foreach ($result in $Results) { $resultByVmId[[string]$result.vmId] = $result }
+  $Checkpoint.guestResults = @(
+    $resultByVmId.GetEnumerator() | Sort-Object Name | ForEach-Object { $_.Value }
+  )
+
   if ($MarkComplete) {
-    $Checkpoint.completedVmIds = @($Checkpoint.completedVmIds + @($Result.vmId) | Sort-Object -Unique)
+    $completedVmIds = @{}
+    foreach ($vmId in @($Checkpoint.completedVmIds)) { $completedVmIds[[string]$vmId] = $true }
+    foreach ($result in $Results) { $completedVmIds[[string]$result.vmId] = $true }
+    $Checkpoint.completedVmIds = @($completedVmIds.Keys | Sort-Object)
   }
   Save-Checkpoint -Checkpoint $Checkpoint
+}
+
+function Set-GuestResult {
+  param($Checkpoint, $Result, [bool]$MarkComplete)
+  Set-GuestResults -Checkpoint $Checkpoint -Results @($Result) -MarkComplete $MarkComplete
 }
 
 function Get-GuestResult {
@@ -294,6 +321,149 @@ function Get-GuestResult {
   return [pscustomobject][ordered]@{
     vmId = $VmRecord.VMId; probeStatus = 'SUCCESS'; powerState = $powerState;
     errorCode = $null; evidence = $evidence; attempts = $runResponse.Attempts
+  }
+}
+
+function Complete-GuestProbe {
+  param($Checkpoint, $WorkItem, $GuestResult)
+  $markComplete = $GuestResult.probeStatus -in @('SUCCESS', 'UNSUPPORTED_OS')
+  Set-GuestResult -Checkpoint $Checkpoint -Result $GuestResult -MarkComplete $markComplete
+  $eventLevel = if ($markComplete) { 'INFO' } else { 'WARN' }
+  Write-RunEvent -Level $eventLevel -Code "GUEST_PROBE_$($GuestResult.probeStatus)" -Resource $WorkItem.eventResource
+}
+
+function Invoke-GuestProbeWorkItems {
+  param($Checkpoint, [object[]]$WorkItems)
+  if ($WorkItems.Count -eq 0) { return }
+
+  $effectiveThrottle = [Math]::Min($ThrottleLimit, $WorkItems.Count)
+  $activity = 'Validating MANA guest evidence'
+  $completedCount = 0
+  Write-Host "Guest probes: $($WorkItems.Count) candidate VM(s), throttle limit $effectiveThrottle"
+
+  if ($effectiveThrottle -eq 1) {
+    foreach ($workItem in $WorkItems) {
+      Write-RunEvent -Level 'INFO' -Code 'GUEST_PROBE_STARTED' -Resource $workItem.eventResource
+      $guestResult = Get-GuestResult -VmRecord $workItem.vmRecord
+      Complete-GuestProbe -Checkpoint $Checkpoint -WorkItem $workItem -GuestResult $guestResult
+      $completedCount++
+      Write-Progress -Activity $activity -Status "$completedCount of $($WorkItems.Count) complete" `
+        -PercentComplete ([int](100 * $completedCount / $WorkItems.Count))
+    }
+    Write-Progress -Activity $activity -Completed
+    return
+  }
+
+  $safeErrorCodeBody = ${function:Get-SafeErrorCode}.ToString()
+  $invokeAzJsonBody = ${function:Invoke-AzJson}.ToString()
+  $getGuestResultBody = ${function:Get-GuestResult}.ToString()
+  $workerScript = @"
+param(
+  `$VmRecord,
+  [int]`$WorkerMaxAttempts,
+  [int]`$WorkerInitialRetryDelaySeconds,
+  [string]`$WorkerAzExecutable,
+  [string]`$WorkerSchemaVersion,
+  [string]`$WorkerLinuxValidatorPath,
+  [string]`$WorkerWindowsValidatorPath
+)
+Set-StrictMode -Version Latest
+`$ErrorActionPreference = 'Stop'
+`$MaxAttempts = `$WorkerMaxAttempts
+`$InitialRetryDelaySeconds = `$WorkerInitialRetryDelaySeconds
+`$AzExecutable = `$WorkerAzExecutable
+`$schemaVersion = `$WorkerSchemaVersion
+`$linuxValidatorPath = `$WorkerLinuxValidatorPath
+`$windowsValidatorPath = `$WorkerWindowsValidatorPath
+function Get-SafeErrorCode {
+$safeErrorCodeBody
+}
+function Invoke-AzJson {
+$invokeAzJsonBody
+}
+function Get-GuestResult {
+$getGuestResultBody
+}
+Get-GuestResult -VmRecord `$VmRecord
+"@
+
+  $runspacePool = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspacePool(1, $effectiveThrottle)
+  $activeWork = New-Object Collections.ArrayList
+  $nextWorkItem = 0
+  try {
+    $runspacePool.Open()
+    while ($nextWorkItem -lt $WorkItems.Count -or $activeWork.Count -gt 0) {
+      while ($nextWorkItem -lt $WorkItems.Count -and $activeWork.Count -lt $effectiveThrottle) {
+        $workItem = $WorkItems[$nextWorkItem]
+        $nextWorkItem++
+        Write-RunEvent -Level 'INFO' -Code 'GUEST_PROBE_STARTED' -Resource $workItem.eventResource
+
+        $pipeline = [System.Management.Automation.PowerShell]::Create()
+        $pipeline.RunspacePool = $runspacePool
+        try {
+          [void]$pipeline.AddScript($workerScript)
+          foreach ($argument in @(
+            $workItem.vmRecord, $MaxAttempts, $InitialRetryDelaySeconds, $AzExecutable,
+            $schemaVersion, $linuxValidatorPath, $windowsValidatorPath
+          )) { [void]$pipeline.AddArgument($argument) }
+          $asyncResult = $pipeline.BeginInvoke()
+          [void]$activeWork.Add([pscustomobject]@{
+            pipeline = $pipeline; asyncResult = $asyncResult; workItem = $workItem
+          })
+        } catch {
+          $pipeline.Dispose()
+          $guestResult = [pscustomobject][ordered]@{
+            vmId = $workItem.vmRecord.VMId; probeStatus = 'ERROR'; powerState = 'UNKNOWN';
+            errorCode = 'GUEST_PROBE_WORKER_FAILED'; evidence = $null; attempts = 0
+          }
+          Complete-GuestProbe -Checkpoint $Checkpoint -WorkItem $workItem -GuestResult $guestResult
+          $completedCount++
+        }
+      }
+
+      if ($activeWork.Count -eq 0) { continue }
+      $waitHandles = [Threading.WaitHandle[]]@($activeWork | ForEach-Object { $_.asyncResult.AsyncWaitHandle })
+      $completedIndex = [Threading.WaitHandle]::WaitAny($waitHandles)
+      $completedWork = $activeWork[$completedIndex]
+      $guestResult = $null
+      try {
+        $workerOutput = @($completedWork.pipeline.EndInvoke($completedWork.asyncResult))
+        foreach ($warningRecord in @($completedWork.pipeline.Streams.Warning)) {
+          Write-Warning ([string]$warningRecord.Message)
+        }
+        if ($workerOutput.Count -eq 1) {
+          $candidateResult = $workerOutput[0]
+          $resultProperties = @($candidateResult.PSObject.Properties.Name)
+          if ($resultProperties -contains 'vmId' -and $resultProperties -contains 'probeStatus' -and
+              [string]$candidateResult.vmId -eq [string]$completedWork.workItem.vmRecord.VMId) {
+            $guestResult = $candidateResult
+          }
+        }
+      } catch {
+        $guestResult = $null
+      } finally {
+        $completedWork.pipeline.Dispose()
+        $activeWork.RemoveAt($completedIndex)
+      }
+
+      if ($null -eq $guestResult) {
+        $guestResult = [pscustomobject][ordered]@{
+          vmId = $completedWork.workItem.vmRecord.VMId; probeStatus = 'ERROR'; powerState = 'UNKNOWN';
+          errorCode = 'GUEST_PROBE_WORKER_FAILED'; evidence = $null; attempts = 0
+        }
+      }
+      Complete-GuestProbe -Checkpoint $Checkpoint -WorkItem $completedWork.workItem -GuestResult $guestResult
+      $completedCount++
+      Write-Progress -Activity $activity -Status "$completedCount of $($WorkItems.Count) complete" `
+        -PercentComplete ([int](100 * $completedCount / $WorkItems.Count))
+    }
+  } finally {
+    foreach ($activeItem in @($activeWork)) {
+      try { $activeItem.pipeline.Stop() } catch { }
+      $activeItem.pipeline.Dispose()
+    }
+    $runspacePool.Dispose()
+    Write-Progress -Activity $activity -Completed
   }
 }
 
@@ -384,9 +554,12 @@ if ($Resume) {
 }
 
 Write-RunEvent -Level 'INFO' -Code 'INVENTORY_STARTED'
+$collectionTimer = [Diagnostics.Stopwatch]::StartNew()
+$inventoryTimer = [Diagnostics.Stopwatch]::StartNew()
 $inventory = @(Get-ArgInventory)
 if ($ResourceGroup) { $inventory = @($inventory | Where-Object { $ResourceGroup -contains $_.resourceGroup }) }
 if ($VmName) { $inventory = @($inventory | Where-Object { $VmName -contains $_.VMName }) }
+$inventoryTimer.Stop()
 $inventoryHash = Get-Sha256Text -Text (ConvertTo-Json -InputObject ([object[]]$inventory) -Depth 20 -Compress)
 if ($Resume) {
   if ($checkpoint.PSObject.Properties.Name -notcontains 'inventoryHash' -or
@@ -402,10 +575,19 @@ Write-JsonAtomic -Value @($publicInventory) -Path $inventoryPath
 Write-RunEvent -Level 'INFO' -Code 'INVENTORY_COMPLETED'
 
 $vmGroups = @($inventory | Group-Object -Property VMId | Sort-Object Name)
+$candidateVmCount = 0
+$guestProbeDurationSeconds = 0
 if (-not $InventoryOnly) {
+  $completedVmIdLookup = @{}
+  foreach ($completedVmId in @($checkpoint.completedVmIds)) {
+    $completedVmIdLookup[[string]$completedVmId] = $true
+  }
+  $skippedGuestResults = New-Object Collections.Generic.List[object]
+  $probeWorkItems = New-Object Collections.Generic.List[object]
+
   foreach ($vmGroup in $vmGroups) {
     $vmId = [string]$vmGroup.Name
-    if ($checkpoint.completedVmIds -contains $vmId) { continue }
+    if ($completedVmIdLookup.ContainsKey($vmId)) { continue }
     $vmRecord = $vmGroup.Group | Select-Object -First 1
     $hasCandidateNic = @($vmGroup.Group | Where-Object { $_.ExposureStatus -eq 'POTENTIAL' }).Count -gt 0
     if (-not $hasCandidateNic) {
@@ -415,30 +597,39 @@ if (-not $InventoryOnly) {
         powerState = 'NOT_QUERIED'; errorCode = if ($hasUnknownExposure) { 'NIC_DATA_MISSING' } else { $null };
         evidence = $null; attempts = 0
       }
-      Set-GuestResult -Checkpoint $checkpoint -Result $guestResult -MarkComplete $true
+      $skippedGuestResults.Add($guestResult)
       continue
     }
 
     $eventResource = if ($RedactResourceNames) {
       Get-RedactedValue 'vm' ([string]$vmRecord.VMName) $checkpoint.redactionSalt
     } else { [string]$vmRecord.VMName }
-    Write-RunEvent -Level 'INFO' -Code 'GUEST_PROBE_STARTED' -Resource $eventResource
-    $guestResult = Get-GuestResult -VmRecord $vmRecord
-    $markComplete = $guestResult.probeStatus -in @('SUCCESS', 'UNSUPPORTED_OS')
-    Set-GuestResult -Checkpoint $checkpoint -Result $guestResult -MarkComplete $markComplete
-    $eventLevel = if ($markComplete) { 'INFO' } else { 'WARN' }
-    Write-RunEvent -Level $eventLevel -Code "GUEST_PROBE_$($guestResult.probeStatus)" -Resource $eventResource
+    $probeWorkItems.Add([pscustomobject]@{ vmRecord = $vmRecord; eventResource = $eventResource })
   }
+
+  if ($skippedGuestResults.Count -gt 0) {
+    Set-GuestResults -Checkpoint $checkpoint -Results $skippedGuestResults.ToArray() -MarkComplete $true
+  }
+  $candidateVmCount = $probeWorkItems.Count
+  $guestProbeTimer = [Diagnostics.Stopwatch]::StartNew()
+  Invoke-GuestProbeWorkItems -Checkpoint $checkpoint -WorkItems $probeWorkItems.ToArray()
+  $guestProbeTimer.Stop()
+  $guestProbeDurationSeconds = $guestProbeTimer.Elapsed.TotalSeconds
 }
 
-$assessment = @()
+$guestResultByVmId = @{}
+foreach ($storedGuestResult in @($checkpoint.guestResults)) {
+  $guestResultByVmId[[string]$storedGuestResult.vmId] = $storedGuestResult
+}
+$assessment = @(
 foreach ($record in $inventory) {
-  $guestResult = @($checkpoint.guestResults | Where-Object { $_.vmId -eq $record.VMId } | Select-Object -First 1)
-  if ($guestResult.Count -eq 0) { $guestResult = $null } else { $guestResult = $guestResult[0] }
+  $guestResult = if ($guestResultByVmId.ContainsKey([string]$record.VMId)) {
+    $guestResultByVmId[[string]$record.VMId]
+  } else { $null }
   $classification = Get-FinalClassification -InventoryRecord $record -GuestResult $guestResult
   $publicRecord = Convert-InventoryRecord -Record $record -Salt $checkpoint.redactionSalt
   $evidence = if ($guestResult -and $guestResult.evidence) { $guestResult.evidence } else { $null }
-  $assessment += [pscustomobject][ordered]@{
+  [pscustomobject][ordered]@{
     schemaVersion               = $schemaVersion
     subscriptionId              = $publicRecord.subscriptionId
     resourceGroup               = $publicRecord.resourceGroup
@@ -476,8 +667,10 @@ foreach ($record in $inventory) {
     location                    = $record.location
   }
 }
+)
 
 $failedGuestResults = @($checkpoint.guestResults | Where-Object { $_.probeStatus -in @('ERROR', 'NOT_RUNNING') })
+$collectionTimer.Stop()
 $summary = [pscustomobject][ordered]@{
   schemaVersion       = $schemaVersion
   generatedAtUtc      = [DateTime]::UtcNow.ToString('o')
@@ -485,6 +678,11 @@ $summary = [pscustomobject][ordered]@{
   reportsRedacted     = [bool]$RedactResourceNames
   rawGuestOutputSaved = $false
   subscriptionCount   = $normalizedSubscriptions.Count
+  throttleLimit       = $ThrottleLimit
+  candidateVmCount    = $candidateVmCount
+  inventoryDurationSeconds = [Math]::Round($inventoryTimer.Elapsed.TotalSeconds, 3)
+  guestProbeDurationSeconds = [Math]::Round($guestProbeDurationSeconds, 3)
+  collectionDurationSeconds = [Math]::Round($collectionTimer.Elapsed.TotalSeconds, 3)
   vmCount             = $vmGroups.Count
   nicCount            = $assessment.Count
   failedVmCount       = $failedGuestResults.Count
@@ -509,5 +707,6 @@ Write-RunEvent -Level 'INFO' -Code "RUN_$($summary.runStatus)"
 
 Write-Host "MANA assessment: $($summary.runStatus)"
 Write-Host "VMs: $($summary.vmCount)  NICs: $($summary.nicCount)  Failed/pending VMs: $($summary.failedVmCount)"
+Write-Host "Timing: inventory $($summary.inventoryDurationSeconds)s  guest probes $($summary.guestProbeDurationSeconds)s"
 Write-Host "Reports: $OutputDirectory"
 if ($summary.runStatus -eq 'PARTIAL') { exit 2 }
