@@ -54,6 +54,7 @@ function Invoke-BenchmarkTrial([int]$Trial, [int]$ThrottleLimit) {
     seconds        = [Math]::Round($timer.Elapsed.TotalSeconds, 3)
     exitCode       = $exitCode
     azureCallCount = $calls.Count
+    azureCallSet   = (@($calls | Sort-Object) -join '|')
     assessmentHash = (Get-FileHash -LiteralPath (Join-Path $outputRoot 'assessment.json') -Algorithm SHA256).Hash
   }
 }
@@ -72,7 +73,18 @@ try {
   )
   if (@($samples | Where-Object exitCode -ne 0).Count -gt 0) { throw 'A benchmark run failed.' }
   if (@($samples.assessmentHash | Sort-Object -Unique).Count -ne 1) { throw 'Serial and parallel assessments differ.' }
-  if (@($samples.azureCallCount | Sort-Object -Unique).Count -ne 1) { throw 'Serial and parallel Azure call counts differ.' }
+  $expectedCalls = @(
+    'graph-query', 'graph-query', 'graph-query',
+    'power:vm-custom', 'power:vm-general', 'power:vm-windows',
+    'run:vm-custom', 'run:vm-general', 'run:vm-windows'
+  )
+  $expectedCallSet = (@($expectedCalls | Sort-Object) -join '|')
+  if (@($samples | Where-Object azureCallCount -ne $expectedCalls.Count).Count -gt 0) {
+    throw "A benchmark run did not make the expected $($expectedCalls.Count) Azure calls."
+  }
+  if (@($samples | Where-Object azureCallSet -ne $expectedCallSet).Count -gt 0) {
+    throw 'A benchmark run did not make the expected inventory and per-VM calls.'
+  }
 
   $serialMedian = Get-Median @($samples | Where-Object throttleLimit -eq 1 | ForEach-Object seconds)
   $parallelMedian = Get-Median @($samples | Where-Object throttleLimit -eq $ParallelThrottleLimit | ForEach-Object seconds)
@@ -86,7 +98,7 @@ try {
     speedup                = [Math]::Round($serialMedian / $parallelMedian, 2)
     elapsedTimeReductionPc = [Math]::Round((1 - ($parallelMedian / $serialMedian)) * 100, 1)
     identicalAssessments   = $true
-    azureCallsPerRun       = $samples[0].azureCallCount
+    azureCallsPerRun       = $expectedCalls.Count
   }
 } finally {
   Remove-Item Env:MANA_FAKE_STATE_DIR -ErrorAction SilentlyContinue

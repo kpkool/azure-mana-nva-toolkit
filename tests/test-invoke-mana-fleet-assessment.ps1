@@ -54,7 +54,10 @@ try {
   Assert-True ($firstSummary.runStatus -eq 'PARTIAL') 'First summary status must be PARTIAL.'
   Assert-True ($firstSummary.throttleLimit -eq 5) 'Summary must record the requested throttle limit.'
   Assert-True ($firstSummary.candidateVmCount -eq 3) 'Summary must record the candidate VM count.'
-  Assert-True ($firstSummary.inventoryDurationSeconds -ge 0 -and $firstSummary.guestProbeDurationSeconds -ge 0) 'Summary must record non-negative phase timings.'
+  Assert-True ($firstSummary.inventoryDurationSeconds -ge 0 -and $firstSummary.guestProbeDurationSeconds -ge 0 -and
+    $firstSummary.collectionDurationSeconds -ge $firstSummary.inventoryDurationSeconds -and
+    $firstSummary.collectionDurationSeconds -ge $firstSummary.guestProbeDurationSeconds) `
+    'Summary must record internally consistent non-negative phase timings.'
   Assert-True ($firstRows.Count -eq 5) 'All five inventory records must be reported.'
   $generalRow = $firstRows | Where-Object VMName -eq 'vm-general'
   Assert-True ($generalRow.ReadinessStatus -eq 'REVIEW_REQUIRED') 'Guest telemetry alone must not classify a workload READY.'
@@ -108,6 +111,9 @@ try {
   $redactedSummary = Get-Content (Join-Path $redactedRoot 'summary.json') -Raw | ConvertFrom-Json
   $redactedText = Get-Content (Join-Path $redactedRoot 'assessment.json') -Raw
   Assert-True ([bool]$redactedSummary.reportsRedacted) 'Summary must record report redaction.'
+  Assert-True ($redactedSummary.guestProbeDurationSeconds -eq 0 -and
+    $redactedSummary.collectionDurationSeconds -ge $redactedSummary.inventoryDurationSeconds) `
+    'Inventory-only summary must record internally consistent phase timings.'
   Assert-True ($redactedText -notmatch 'vm-general|rg-fixture|nic-general') 'Redacted report must not expose resource names.'
 
   'Fleet assessment fixture tests: PASS'

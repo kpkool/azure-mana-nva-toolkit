@@ -42,8 +42,8 @@ PowerShell 5.1+ and Azure CLI with the Resource Graph extension.
 
 The runner first retrieves complete, paged inventory for the selected subscriptions, then applies resource-group
 and VM filters locally. Selected-subscription fleet size affects this inventory prelude; only filtered VMs with a
-`POTENTIAL` NIC incur guest work. Each running candidate requires an instance-view call followed by one blocking
-Action Run Command.
+`POTENTIAL` NIC incur guest work. On a successful first attempt, each running candidate requires an instance-view
+call followed by one blocking Action Run Command. Retries can add calls.
 
 Concurrency is bounded across distinct VMs. The scheduler assigns at most one worker to each VM; Azure permits one
 active Action Run Command script per VM. Workers return structured results only; the parent process owns event and
@@ -70,9 +70,10 @@ numbers prove that overlap removes serialization cost; they are not an Azure run
 on candidate count, guest-agent latency, retry activity, and service throttling.
 
 `summary.json` records `candidateVmCount`, `throttleLimit`, `inventoryDurationSeconds`,
-`guestProbeDurationSeconds`, and `collectionDurationSeconds`. Use these per-run measurements to identify whether
-inventory or guest commands dominate in the target subscription. On resume, candidate count and guest time cover
-only probes attempted by that invocation.
+`guestProbeDurationSeconds`, and `collectionDurationSeconds`. Collection duration ends after classification and
+before report files are serialized. Use these per-run measurements to identify whether inventory or guest commands
+dominate in the target subscription. On resume, candidate count and guest time cover only probes attempted by that
+invocation.
 
 ## Status contract
 
