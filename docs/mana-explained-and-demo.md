@@ -83,6 +83,151 @@ flowchart LR
 - **If Accelerated Networking is disabled**, Microsoft states that **no action is required**. Classify AN from the
   Azure NIC resource; guest PCI/VF visibility does not override that control-plane setting.
 
+---
+
+## 2a. Deep In-Guest Architecture: Synthetic Primary vs. VF Acceleration Plumbing
+
+To understand why network configuration survives hardware swaps without reconfiguration, inspect Azure's **dual-layer network adapter model**:
+
+```mermaid
+flowchart TB
+  classDef appLayer fill:#E1F5FE,stroke:#0288D1,stroke-width:2px;
+  classDef synthLayer fill:#E8F5E9,stroke:#388E3C,stroke-width:2px;
+  classDef vfLayer fill:#FFF3E0,stroke:#F57C00,stroke-width:2px;
+  classDef hwLayer fill:#EDE7F6,stroke:#512DA8,stroke-width:2px;
+
+  subgraph GuestOS["Guest OS Boundary (Linux / Windows)"]
+    App["Application / Workload Sockets<br/>(Binds strictly to Synthetic Primary NIC)"]:::appLayer
+
+    subgraph PrimaryNIC["Synthetic Primary Network Interface (Routable Configuration)"]
+      Syn["Linux: eth0 (hv_netvsc)<br/>Windows: Ethernet (Microsoft Hyper-V Network Adapter)<br/><b>Configuration Anchor:</b> IPv4/IPv6, MAC, Subnet Mask, Gateway, DNS, Static Routes"]:::synthLayer
+    end
+
+    subgraph VFPlumbing["SR-IOV Virtual Function (VF) - Acceleration Plumbing Only"]
+      VF["Linux: enP* / ens1 | Windows: Mellanox / MANA Adapter<br/><b>Role:</b> Raw packet DMA offload into guest memory<br/><b>Configuration:</b> Inherits MAC from Synthetic; NO direct IP/DNS configuration"]:::vfLayer
+    end
+
+    App -->|"Send / Receive Traffic"| Syn
+    Syn ==>|"Bonded Acceleration Path (SR-IOV DMA)"| VF
+    Syn -.->|"Fallback Path (vSwitch emulation when VF missing)"| VSwitch["Hyper-V Virtual Switch (Software NetVSC)"]:::synthLayer
+  end
+
+  subgraph HostBoundary["Azure Physical Host Boundary"]
+    HostHW["Physical NIC Hardware<br/>(Mellanox ConnectX-5 OR Microsoft MANA 00ba)"]:::hwLayer
+    VF ==>|"Direct Hardware Queues (Bypasses Hypervisor CPU)"| HostHW
+    VSwitch -.->|"Hypervisor CPU Intercept"| HostHW
+  end
+```
+
+### Key Takeaways from the In-Guest Model:
+
+1. **The Synthetic Interface is the Configuration Owner:** IP addresses, default gateway, DNS servers, DHCP leases, and custom DNS registration settings are bound **exclusively** to `eth0` / `Ethernet`.
+2. **The VF is Transparent Plumbing:** The Virtual Function does not possess independent network identities. The hypervisor network driver (`hv_netvsc` or Windows Hyper-V driver) bonds with the VF and transparently steers network packets directly across PCIe DMA buffers.
+3. **Resilience against Driver Absences:** If a VM is placed on MANA hardware but lacks the in-guest MANA driver, the synthetic interface seamlessly diverts traffic across the software NetVSC fallback path without dropping the IP or disconnecting the interface.
+
+---
+
+## 2b. VF Name Volatility: Why You Must Never Bind Workloads to VF Names
+
+A frequent engineering pitfall is writing scripts, firewall rules, monitoring agents, or application bindings against the underlying VF adapter name rather than the synthetic primary adapter.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Admin as Azure Operator
+  participant Azure as Azure Control Plane
+  participant Syn as Synthetic NIC (eth0 / Ethernet)
+  participant VF as Hardware VF (enP* / Ethernet N)
+
+  Note over Syn,VF: Initial State: Running on ConnectX-5 Hardware
+  Admin->>Azure: az vm deallocate & az vm start (or Resize)
+  Azure->>Azure: Allocates VM onto target host chassis
+  Note over Syn: Boot: eth0 / Ethernet preserves MAC, IP, Subnet, DNS
+  Azure-->>VF: Re-enumerates PCIe Virtual Function
+  Note over VF: Linux: enP44637s1 -> ens1 (or enP63977s1)<br/>Windows: Ethernet 3 -> Ethernet 4 -> Ethernet 5
+  Syn->>VF: NetVSC auto-bonds to newly enumerated VF
+  Note over Admin,VF: CRITICAL: Workloads bound to synthetic NIC stay UP.<br/>Workloads bound to old VF name break immediately!
+```
+
+### Volatility Observed in Empirical Runs:
+
+- **Linux:** Mellanox VFs derive names from PCI bus coordinates (e.g., `enP44637s1` $\rightarrow$ `enP63977s1` $\rightarrow$ `enP10677s1` across deallocations). MANA VFs standardize on `ens1`.
+- **Windows:** Mellanox VFs increment sequential friendly names upon every hardware re-enumeration (`Ethernet 3` $\rightarrow$ `Ethernet 4` $\rightarrow$ `Ethernet 5` $\rightarrow$ `Ethernet 6` $\rightarrow$ `Ethernet 7`).
+- **Rule of Thumb:** **Always bind applications, sockets, and firewalls to `eth0` (Linux) or `Ethernet` (Windows). Never reference the VF adapter name.**
+
+---
+
+## 2c. Resizing Gotcha: Disk Controller Type for v6/v7 (NVMe Requirement)
+
+When modernizing a workload from an older generation (e.g., v5 series such as `Standard_D4s_v5`) to a MANA-native series (such as `Standard_D4ds_v6` or `Standard_D8s_v6`):
+
+```mermaid
+flowchart LR
+  classDef errorState fill:#FFEBEE,stroke:#C62828,stroke-width:2px;
+  classDef successState fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px;
+
+  subgraph Failure["Common Failure Path"]
+    V5_SCSI["VM on v5 Size<br/>(DiskControllerType = SCSI)"] --> ResizeOnly["az vm update --size Standard_D4ds_v6"]
+    ResizeOnly --> Error["REJECTED: InvalidParameter<br/>'The VM size cannot boot with DiskControllerType SCSI'"]:::errorState
+  end
+
+  subgraph Success["Correct Atomic Modernization Path"]
+    V5_Correct["VM on v5 Size<br/>(Deallocated)"] --> AtomicUpdate["az vm update \<br/>--set storageProfile.diskControllerType=NVMe \<br/>--size Standard_D4ds_v6"]
+    AtomicUpdate --> SuccessState["SUCCESS: VM updated to v6 with NVMe<br/>Ready for Start onto MANA hardware"]:::successState
+  end
+```
+
+### Execution Requirement:
+
+Azure v6 and v7 VM series are engineered on Azure Boost and only support `NVMe` disk controllers. Always update the disk controller type atomically when changing sizes:
+
+```powershell
+# 1. Stop and deallocate the VM
+az vm deallocate -g <resource-group> -n <vm-name>
+
+# 2. Atomic size and controller update
+az vm update -g <resource-group> -n <vm-name> \
+  --set storageProfile.diskControllerType=NVMe \
+  --size Standard_D4ds_v6
+
+# 3. Start the VM on MANA hardware
+az vm start -g <resource-group> -n <vm-name>
+```
+
+---
+
+## 2d. Outage Boundary: When Allocation Changes Occur & Downtime Window
+
+A common operational concern is whether Azure dynamically swaps physical hardware under running production VMs.
+
+```mermaid
+timeline
+  title VM Lifecycle & Platform Outage Boundary Timeline
+  section Stop & Deallocate
+    Deallocate Request : 0s
+    Compute Released & Disk Flushed : ~34s
+  section Hardware Re-Allocation
+    Target Placement & NVMe/v6 Provisioning : ~5s to 35s
+  section OS Boot & Agent Readiness
+    Host Boot & Kernel Initialization : ~45s
+    Guest Agent Ready & VF Bonded : ~78s to 112s Total
+  section Workload Recovery
+    Application Services Start : Workload Dependent
+    Hardware Acceleration Confirmed : Milliseconds post-boot
+```
+
+### Verified Outage Facts:
+
+1. **No Live-Host Hot Swapping:** Azure does not swap physical host NICs underneath a running virtual machine without an explicit lifecycle event.
+2. **Allocation Triggers:**
+   - Stop-Deallocate $\rightarrow$ Start
+   - VM Resize
+   - Azure Platform Host Maintenance (Healing / Node Redeploy)
+   - Enabling Accelerated Networking on a non-AN NIC
+3. **Empirical Platform Downtime Window:** Active platform downtime is strictly limited to the duration of standard VM restart and OS boot (**$\sim$78s to 112s** observed in live tests).
+
+---
+
 ### The three things that must line up
 
 MANA acceleration needs **all three**. Miss one and you land in the fallback lane (or MANA is simply irrelevant):

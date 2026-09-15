@@ -4,6 +4,14 @@ Starting with this file's introduction, every update to `main` must add a dated 
 Entries must state what changed, how it was validated, and any material limitation. Synthetic measurements must be
 labeled and must not be presented as an Azure service-level guarantee.
 
+## 2026-09-14 - Architecture, VF Volatility & Controller Gotcha Documentation
+
+- Added deep in-guest architectural explanation and color-coded Mermaid diagrams to `docs/mana-explained-and-demo.md`.
+- Documented dual-layer network stack: synthetic primary interface (`eth0`/`Ethernet`) as configuration owner vs. SR-IOV Virtual Function (VF) as transparent hardware DMA acceleration plumbing.
+- Documented VF name volatility (Mellanox dynamic enumeration on Linux, sequential index increments on Windows) and why workloads must strictly bind to synthetic primary adapters.
+- Documented Azure Boost v6/v7 disk controller requirement (`DiskControllerType=NVMe`) and atomic `--set storageProfile.diskControllerType=NVMe` update command for v5 $\rightarrow$ v6 resizing.
+- Documented operational outage boundaries and empirical lifecycle timing windows ($\sim$78s to 112s platform downtime during planned allocation events).
+
 ## 2026-09-11 - Release-note policy and performance evidence audit
 
 - Added this append-only release ledger for all future `main` updates.
